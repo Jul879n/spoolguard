@@ -35,6 +35,10 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev patchelf
       - name: Pruebas de la lista de apps
         run: cargo test -p control-impresion apps_tests -- --nocapture
+      # Los tests de spooler cuentan trabajos impresos con el evento 307 de este log, desactivado por defecto en los runners.
+      - name: Habilitar el log operativo del spooler (Windows)
+        if: runner.os == 'Windows'
+        run: wevtutil sl Microsoft-Windows-PrintService/Operational /e:true
       - name: Pruebas del núcleo (reglas, host, spooler en Windows)
         # Una a una: los tests de spooler_windows comparten el spooler real y compiten si corren en paralelo.
         run: cargo test -p control-core -- --nocapture --test-threads=1
