@@ -1,0 +1,36 @@
+package cups
+
+import "testing"
+
+func TestValidQueue(t *testing.T) {
+	ok := []string{"Oficina", "HP_LaserJet-400", "Taller.2", "impresora_ñ"}
+	bad := []string{"", "-p", "--help", "-o", "a b", "a\nb", "a\rb", "a\x00b", "a/b", "../x", "a#b", "a?b=1", "a\\b", "a\tb"}
+	for _, n := range ok {
+		if !ValidQueue(n) {
+			t.Errorf("rechazó %q", n)
+		}
+	}
+	for _, n := range bad {
+		if ValidQueue(n) {
+			t.Errorf("aceptó %q", n)
+		}
+	}
+}
+
+func TestMutadoresRechazanNombresMaliciosos(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // sin lpadmin/lpstat/ipptool: si se llamara a alguno, el error sería otro
+	for _, n := range []string{"-x", "a b", "a\nb", "a/b"} {
+		if err := SetHold(t.TempDir(), n, true); err != errQueue {
+			t.Errorf("SetHold(%q) = %v", n, err)
+		}
+		if err := HoldNewJobs(t.TempDir(), n, true); err != errQueue {
+			t.Errorf("HoldNewJobs(%q) = %v", n, err)
+		}
+		if _, err := HeldJobIDs(n); err != errQueue {
+			t.Errorf("HeldJobIDs(%q) = %v", n, err)
+		}
+		if DeviceURI(t.TempDir(), n) != "" || Info(t.TempDir(), n, nil).Status != "desconocido" {
+			t.Errorf("Info/DeviceURI aceptaron %q", n)
+		}
+	}
+}

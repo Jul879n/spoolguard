@@ -1,0 +1,271 @@
+{
+  "now": 1800000000,
+  "_doc": "Vectores compartidos de la copia de seguridad: core/tests/backup_vectors.rs (Rust) e internal/app/backup_test.go (Go). Tipos de caso: parse_error, modes_error, import, export (con ida y vuelta). 'preview' usa rutas con puntos; 'next' es el estado resultante completo.",
+  "cases": [
+    {"kind": "parse_error", "name": "archivo corrupto (JSON truncado)", "raw": "{\"format\":", "error": "no es un JSON válido"},
+    {"kind": "parse_error", "name": "vacío", "raw": "", "error": "no es un JSON válido"},
+    {"kind": "parse_error", "name": "basura después del JSON", "raw": "{\"format\":\"spoolguard-backup\",\"version\":1} xx", "error": "no es un JSON válido"},
+    {"kind": "parse_error", "name": "no es un objeto", "raw": "[1,2,3]", "error": "se esperaba un objeto"},
+    {"kind": "parse_error", "name": "formato desconocido", "raw": "{\"format\":\"otra-cosa\",\"version\":1}", "error": "formato desconocido"},
+    {"kind": "parse_error", "name": "objeto cualquiera sin formato ni reglas", "raw": "{\"hola\":1}", "error": "formato desconocido"},
+    {"kind": "parse_error", "name": "versión futura", "raw": "{\"format\":\"spoolguard-backup\",\"version\":2}", "error": "Versión de formato no soportada (2)"},
+    {"kind": "parse_error", "name": "versión como texto", "raw": "{\"format\":\"spoolguard-backup\",\"version\":\"1\"}", "error": "Versión de formato inválida"},
+    {"kind": "parse_error", "name": "versión cero", "raw": "{\"format\":\"spoolguard-backup\",\"version\":0}", "error": "Versión de formato inválida"},
+    {"kind": "parse_error", "name": "archivo enorme", "gen": {"pad": 10485761}, "error": "demasiado grande"},
+    {"kind": "parse_error", "name": "anidamiento excesivo", "gen": {"deep": 100}, "error": "demasiado anidado"},
+
+    {"kind": "modes_error", "name": "modo desconocido", "modo": "borrar", "error": "Modo desconocido"},
+    {"kind": "modes_error", "name": "modo con tipo erróneo", "modo": {"reglas": 5}, "error": "Modo inválido"},
+
+    {
+      "kind": "import", "name": "reglas combinar: unión de listas, impresora nueva y modo del archivo",
+      "current": {"printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": ["10.0.0.5"]}}, "global": {"enabled": false, "mode": null, "apps": [], "sites": ["facebook.com"], "ips": []}},
+      "local": ["Oficina", "Taller"],
+      "file": {"format": "spoolguard-backup", "version": 1, "reglas": {
+        "global": {"enabled": true, "mode": "block", "apps": [], "sites": ["tiktok.com"], "ips": []},
+        "printers": {
+          "Oficina": {"enabled": false, "mode": null, "apps": ["Word", "*.pdf"], "sites": [], "ips": ["10.0.0.5", "192.168.1.0/24"]},
+          "Taller": {"enabled": true, "mode": "allow", "apps": ["*.docx"], "sites": [], "ips": []}}}},
+      "modo": "combinar",
+      "expect": {
+        "ok": true, "applied": ["reglas"],
+        "next": {"printers": {
+          "Oficina": {"enabled": false, "mode": "block", "apps": ["Word", "*.pdf"], "sites": [], "ips": ["10.0.0.5", "192.168.1.0/24"]},
+          "Taller": {"enabled": true, "mode": "allow", "apps": ["*.docx"], "sites": [], "ips": []}},
+          "global": {"enabled": true, "mode": "block", "apps": [], "sites": ["facebook.com", "tiktok.com"], "ips": []}},
+        "preview": {"reglas.nuevas": 1, "reglas.modificadas": 1, "reglas.eliminadas": 0, "reglas.iguales": 0, "reglas.global": "modificado", "avisos": [], "errores": []}
+      }
+    },
+    {
+      "kind": "import", "name": "reglas reemplazar: lo ausente del archivo se elimina",
+      "current": {"printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": []}, "Taller": {"enabled": true, "mode": "block", "apps": ["Excel"], "sites": [], "ips": []}}, "global": {"enabled": true, "mode": "block", "apps": ["x"], "sites": [], "ips": []}},
+      "local": ["Oficina", "Taller"],
+      "file": {"format": "spoolguard-backup", "version": 1, "reglas": {"printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": []}}}},
+      "modo": "reemplazar",
+      "expect": {
+        "ok": true,
+        "next": {"printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": []}}, "global": {"enabled": true, "mode": "block", "apps": ["x"], "sites": [], "ips": []}},
+        "preview": {"reglas.nuevas": 0, "reglas.modificadas": 0, "reglas.iguales": 1, "reglas.eliminadas": 1, "reglas.global": "igual"}
+      }
+    },
+    {
+      "kind": "import", "name": "impresora que no existe en el equipo: se importa y se avisa",
+      "current": {},
+      "local": ["Oficina"],
+      "file": {"format": "spoolguard-backup", "version": 1, "reglas": {"printers": {"Fantasma": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": []}}}},
+      "modo": "combinar",
+      "expect": {
+        "ok": true,
+        "next": {"printers": {"Fantasma": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": []}}},
+        "preview": {"reglas.nuevas": 1, "reglas.impresoras": [{"nombre": "Fantasma", "estado": "nueva", "existe": false}]},
+        "warnings_contain": ["Fantasma", "no se activa la retención"]
+      }
+    },
+    {
+      "kind": "import", "name": "parámetros combinar: solo cambian los presentes",
+      "current": {"params": {"unknown_policy": "block", "interval_secs": 5, "notify_block": false, "notify_allow": true, "theme": "light", "retention_days": 30}},
+      "local": [],
+      "file": {"format": "spoolguard-backup", "version": 1, "parametros": {"theme": "dark"}},
+      "modo": "combinar",
+      "expect": {
+        "ok": true,
+        "next": {"params": {"unknown_policy": "block", "interval_secs": 5, "notify_block": false, "notify_allow": true, "theme": "dark", "retention_days": 30}},
+        "preview": {"parametros.cambios": [{"campo": "theme", "de": "light", "a": "dark"}]}
+      }
+    },
+    {
+      "kind": "import", "name": "parámetros reemplazar: lo ausente vuelve al valor por defecto",
+      "current": {"params": {"unknown_policy": "block", "interval_secs": 5, "notify_block": false, "notify_allow": true, "theme": "light", "retention_days": 30}},
+      "local": [],
+      "file": {"format": "spoolguard-backup", "version": 1, "parametros": {"theme": "dark"}},
+      "modo": "reemplazar",
+      "expect": {
+        "ok": true,
+        "next": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 90}}
+      }
+    },
+    {
+      "kind": "import", "name": "intento de colar contraseña, tokens y claves peligrosas en parámetros",
+      "current": {"params": {"unknown_policy": "allow", "interval_secs": 2, "notify_block": true, "notify_allow": false, "theme": "light", "retention_days": 90}},
+      "local": [],
+      "file": {"format": "spoolguard-backup", "version": 1,
+        "password_hash": "aaaa", "token": "sgm_robado", "session": "xyz",
+        "parametros": {"theme": "dark", "password_hash": "deadbeef", "password_salt": "s", "server_token": "sgm_x", "ext_token": "t", "send_events": true, "server_url": "http://evil", "__proto__": {"polluted": true}, "constructor": {"prototype": {"x": 1}}}},
+      "modo": "reemplazar",
+      "expect": {
+        "ok": true,
+        "next": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 90}},
+        "preview": {"errores": []},
+        "warnings_contain": ["campo sensible ignorado por seguridad: password_hash", "campo sensible ignorado por seguridad: password_salt", "campo sensible ignorado por seguridad: server_token", "campo sensible ignorado por seguridad: ext_token", "campo sensible ignorado por seguridad: token", "campo sensible ignorado por seguridad: session", "clave peligrosa ignorada: __proto__", "clave peligrosa ignorada: constructor", "campo desconocido ignorado: send_events", "campo desconocido ignorado: server_url"]
+      }
+    },
+    {
+      "kind": "import", "name": "campos sensibles dentro de las reglas se ignoran",
+      "current": {},
+      "local": ["Oficina"],
+      "file": {"format": "spoolguard-backup", "version": 1, "reglas": {"printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": [], "token": "sgm_x", "__proto__": {"admin": true}}}}},
+      "modo": "combinar",
+      "expect": {
+        "ok": true,
+        "next": {"printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": []}}},
+        "warnings_contain": ["campo sensible ignorado por seguridad: token", "clave peligrosa ignorada: __proto__"]
+      }
+    },
+    {
+      "kind": "import", "name": "tipos erróneos y patrones inválidos se rechazan con el motivo",
+      "current": {},
+      "local": ["Oficina"],
+      "file": {"format": "spoolguard-backup", "version": 1,
+        "parametros": {"theme": "neon", "interval_secs": "5", "retention_days": 99999, "unknown_policy": 7, "notify_block": "si"},
+        "reglas": {"global": {"enabled": "yes", "mode": "maybe", "apps": "Word", "sites": ["mal dominio!"], "ips": ["999.1.1.1", "10.0.0.0/33", "10.0.0.1/", "::1/129", 5]},
+                   "printers": {"Oficina": {"apps": ["*.", "ok"], "sites": [""], "ips": ["10.0.0.1/ab"]}, "__proto__": {"enabled": true}, "-malo": {}, "Otra": 5}}},
+      "modo": "combinar",
+      "expect": {
+        "ok": false,
+        "errors_contain": ["parametros.theme", "parametros.interval_secs", "parametros.retention_days", "parametros.unknown_policy", "parametros.notify_block", "reglas.global.enabled", "reglas.global.mode", "reglas.global.apps: debe ser una lista", "dominio inválido", "IP o CIDR inválido", "prefijo CIDR inválido", "debe ser texto", "extensión inválida", "nombre de impresora no permitido", "las reglas deben ser un objeto"]
+      }
+    },
+    {
+      "kind": "import", "name": "formato antiguo de reglas (config.json): reglas y ajustes permitidos, sin tokens ni contraseña",
+      "current": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "system", "retention_days": 90}},
+      "local": ["Oficina"],
+      "file": {"printers": {"Oficina": {"enabled": true, "mode": "allow", "apps": ["*.pdf"], "sites": ["a.cl"], "ips": ["10.1.1.0/24"]}, "Vieja": {"enabled": false, "mode": null, "apps": [], "sites": [], "ips": []}},
+               "global": {"enabled": true, "mode": "block", "apps": [], "sites": [], "ips": ["1.2.3.4"]},
+               "settings": {"unknown_policy": "block", "interval_secs": 3, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 10, "password_hash": "h", "password_salt": "s", "paused": true, "send_events": true, "server_url": "https://x", "server_token": "sgm_secreto"}},
+      "modo": "reemplazar",
+      "expect": {
+        "ok": true, "applied": ["reglas", "parametros"],
+        "next": {"printers": {
+            "Oficina": {"enabled": true, "mode": "allow", "apps": ["*.pdf"], "sites": ["a.cl"], "ips": ["10.1.1.0/24"]},
+            "Vieja": {"enabled": false, "mode": null, "apps": [], "sites": [], "ips": []}},
+          "global": {"enabled": true, "mode": "block", "apps": [], "sites": [], "ips": ["1.2.3.4"]},
+          "params": {"unknown_policy": "block", "interval_secs": 3, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 10}},
+        "preview": {"legacy": true, "reglas.nuevas": 2},
+        "warnings_contain": ["Formato antiguo de reglas", "settings: campo sensible ignorado por seguridad: password_hash", "settings: campo sensible ignorado por seguridad: server_token"]
+      }
+    },
+    {
+      "kind": "import", "name": "categorías por modo: omitir reglas, combinar parámetros",
+      "current": {"printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": []}}},
+      "local": ["Oficina"],
+      "file": {"format": "spoolguard-backup", "version": 1, "reglas": {"printers": {"Oficina": {"enabled": false, "mode": null, "apps": [], "sites": [], "ips": []}}}, "parametros": {"theme": "dark"}},
+      "modo": {"reglas": "omitir", "parametros": "combinar"},
+      "expect": {
+        "ok": true, "applied": ["parametros"],
+        "next": {"printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": []}}, "params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 90}},
+        "preview": {"reglas": null, "registro": null}
+      }
+    },
+    {
+      "kind": "import", "name": "registro combinar: ids propios, idempotente, descarta inválidos y duplicados del archivo",
+      "current": {},
+      "local": [],
+      "existing_ids": ["aaaaaaaa-0001"],
+      "event_count": 7,
+      "file": {"format": "spoolguard-backup", "version": 1, "registro": [
+        {"id": "aaaaaaaa-0001", "ts": 1700000000, "printer": "Oficina", "decision": "allow"},
+        {"id": "aaaaaaaa-0002", "ts": 1700000001, "printer": "Oficina", "document": "a.docx", "decision": "block", "pages": 3, "password_hash": "x"},
+        {"id": "aaaaaaaa-0002", "ts": 1700000001, "printer": "Oficina", "decision": "block"},
+        {"id": "x", "ts": 1700000002, "decision": "allow"},
+        {"id": "aaaaaaaa-0003", "ts": 5, "decision": "allow"},
+        {"id": "aaaaaaaa-0004", "ts": 1700000003, "decision": "raro"},
+        {"id": "aaaaaaaa-0005", "ts": 1700000004, "decision": "allow", "pages": -1},
+        {"id": "aaaaaaaa-0006", "ts": 1700000005, "decision": "allow", "user": 5},
+        "texto"]},
+      "modo": "combinar",
+      "expect": {
+        "ok": true, "event_ids": ["aaaaaaaa-0002"], "replace_events": false,
+        "preview": {"registro.a_importar": 1, "registro.duplicados": 2, "registro.descartados": 6, "registro.a_borrar": 0}
+      }
+    },
+    {
+      "kind": "import", "name": "registro reemplazar: borra el actual e importa todo (sin contar existentes)",
+      "current": {},
+      "local": [],
+      "existing_ids": ["aaaaaaaa-0001"],
+      "event_count": 7,
+      "file": {"format": "spoolguard-backup", "version": 1, "registro": [
+        {"id": "aaaaaaaa-0001", "ts": 1700000000, "printer": "Oficina", "decision": "allow"},
+        {"id": "aaaaaaaa-0002", "ts": 1700000001, "decision": "block"}]},
+      "modo": "reemplazar",
+      "expect": {
+        "ok": true, "event_ids": ["aaaaaaaa-0001", "aaaaaaaa-0002"], "replace_events": true,
+        "preview": {"registro.a_importar": 2, "registro.duplicados": 0, "registro.a_borrar": 7}
+      }
+    },
+    {
+      "kind": "import", "name": "bloqueo rápido en servidor, combinar",
+      "current": {"quick": {"blocks": [{"host": "pc1", "ips": ["10.0.0.1"], "by": "admin@1.1.1.1", "time": 100}], "paused_printers": {"Oficina": {"by": "a", "time": 1}}}},
+      "local": ["Oficina"], "server": true,
+      "file": {"format": "spoolguard-backup", "version": 1, "bloqueo_rapido": {"blocks": [{"host": "pc1", "ips": ["10.0.0.1", "10.0.0.2"], "by": "b", "time": 200}, {"host": "pc2", "ips": ["10.0.0.9"], "by": "b", "time": 201}], "paused_printers": {"Taller": {"by": "b", "time": 5}, "Fantasma": {"by": "b", "time": 6}}}},
+      "modo": "combinar",
+      "expect": {
+        "ok": true, "applied": ["bloqueo_rapido"],
+        "next": {"quick": {"blocks": [{"host": "pc1", "ips": ["10.0.0.1", "10.0.0.2"], "by": "b", "time": 200}, {"host": "pc2", "ips": ["10.0.0.9"], "by": "b", "time": 201}], "paused_printers": {"Oficina": {"by": "a", "time": 1}, "Taller": {"by": "b", "time": 5}, "Fantasma": {"by": "b", "time": 6}}}},
+        "preview": {"bloqueo_rapido.bloqueos_nuevos": 1, "bloqueo_rapido.pausadas_nuevas": 2},
+        "warnings_contain": ["Fantasma"]
+      }
+    },
+    {
+      "kind": "import", "name": "bloqueo rápido en escritorio: se ignora con aviso",
+      "current": {},
+      "local": ["Oficina"], "server": false,
+      "file": {"format": "spoolguard-backup", "version": 1, "bloqueo_rapido": {"blocks": [{"host": "pc1", "ips": ["10.0.0.1"], "by": "b", "time": 200}], "paused_printers": {}}},
+      "modo": "reemplazar",
+      "expect": {"ok": true, "applied": [], "next": {}, "warnings_contain": ["solo existe en el servidor"]}
+    },
+    {
+      "kind": "import", "name": "bloqueo rápido inválido",
+      "current": {},
+      "local": [], "server": true,
+      "file": {"format": "spoolguard-backup", "version": 1, "bloqueo_rapido": {"blocks": [{"host": "pc 1", "ips": ["10.0.0.1"], "by": "b", "time": 1}, {"host": "pc2", "ips": ["no-ip"], "by": "b", "time": 1}], "paused_printers": {"-x": {"by": "b", "time": 1}}}},
+      "modo": "combinar",
+      "expect": {"ok": false, "errors_contain": ["blocks[0]", "blocks[1]: IP o CIDR inválido", "paused_printers"]}
+    },
+    {
+      "kind": "import", "name": "inventario es informativo y avisa de impresoras ausentes",
+      "current": {},
+      "local": ["Oficina"],
+      "file": {"format": "spoolguard-backup", "version": 1, "inventario": [{"name": "Oficina", "kind": "red", "uri": "ipp://u:p@10.0.0.5/ipp?x=1"}, {"name": "Otra", "kind": "usb", "uri": "usb://HP"}, {"name": "", "kind": "x", "uri": ""}]},
+      "modo": "combinar",
+      "expect": {"ok": true, "applied": [], "preview": {"inventario.impresoras": 2}, "warnings_contain": ["1 impresoras del archivo no existen", "elementos inválidos"]}
+    },
+
+    {
+      "kind": "export", "name": "ida y vuelta (escritorio): exportar, importar en un equipo vacío y obtener lo mismo",
+      "state": {
+        "printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word", "*.pdf"], "sites": ["facebook.com"], "ips": ["192.168.1.0/24"]}, "Taller": {"enabled": false, "mode": "allow", "apps": [], "sites": [], "ips": []}},
+        "global": {"enabled": true, "mode": "block", "apps": [], "sites": ["tiktok.com"], "ips": ["10.0.0.5"]},
+        "params": {"unknown_policy": "block", "interval_secs": 2, "notify_block": true, "notify_allow": true, "theme": "dark", "retention_days": 30}},
+      "categories": ["registro", "parametros", "reglas", "inventario"],
+      "events": [{"id": "bbbbbbbb-0001", "ts": 1700000000, "host": "pc", "ip": "", "user": "ana", "printer": "Oficina", "port": "", "conn_type": "", "document": "a.docx", "site": "", "app": "Word", "pages": 2, "bytes": null, "decision": "block", "reason": "Aplicación: Word", "status": "cancelado", "source": "desktop"}],
+      "inventory": [{"name": "Oficina", "kind": "red", "uri": "ipp://admin:clave@10.0.0.5/ipp/print?token=1"}],
+      "meta": {"created": 1750000000, "host": "pc-ana", "app_version": "1.2.3"},
+      "expect_file": {"format": "spoolguard-backup", "version": 1, "created": 1750000000, "host": "pc-ana", "app_version": "1.2.3",
+        "categories": ["reglas", "parametros", "registro", "inventario"],
+        "reglas": {
+          "global": {"enabled": true, "mode": "block", "apps": [], "sites": ["tiktok.com"], "ips": ["10.0.0.5"]},
+          "printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word", "*.pdf"], "sites": ["facebook.com"], "ips": ["192.168.1.0/24"]}, "Taller": {"enabled": false, "mode": "allow", "apps": [], "sites": [], "ips": []}}},
+        "parametros": {"unknown_policy": "block", "interval_secs": 2, "notify_block": true, "notify_allow": true, "theme": "dark", "retention_days": 30},
+        "registro": [{"id": "bbbbbbbb-0001", "ts": 1700000000, "host": "pc", "ip": "", "user": "ana", "printer": "Oficina", "port": "", "conn_type": "", "document": "a.docx", "site": "", "app": "Word", "pages": 2, "bytes": null, "decision": "block", "reason": "Aplicación: Word", "status": "cancelado", "source": "desktop"}],
+        "inventario": [{"name": "Oficina", "kind": "red", "uri": "ipp://10.0.0.5/ipp/print"}]},
+      "server": false
+    },
+    {
+      "kind": "export", "name": "ida y vuelta (servidor) con bloqueo rápido; categorías no pedidas no salen",
+      "state": {
+        "printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": []}},
+        "global": {"enabled": true, "mode": "block", "apps": [], "sites": [], "ips": ["10.0.0.9"]},
+        "quick": {"blocks": [{"host": "pc9", "ips": ["10.0.0.9"], "by": "admin@10.0.0.1", "time": 1700000100}], "paused_printers": {"Oficina": {"by": "admin@10.0.0.1", "time": 1700000200}}}},
+      "categories": ["bloqueo_rapido", "reglas"],
+      "events": [], "inventory": [],
+      "meta": {"created": 1750000000, "host": "srv", "app_version": "1.2.3"},
+      "expect_file": {"format": "spoolguard-backup", "version": 1, "created": 1750000000, "host": "srv", "app_version": "1.2.3",
+        "categories": ["reglas", "bloqueo_rapido"],
+        "reglas": {"global": {"enabled": true, "mode": "block", "apps": [], "sites": [], "ips": ["10.0.0.9"]},
+                   "printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": []}}},
+        "bloqueo_rapido": {"blocks": [{"host": "pc9", "ips": ["10.0.0.9"], "by": "admin@10.0.0.1", "time": 1700000100}], "paused_printers": {"Oficina": {"by": "admin@10.0.0.1", "time": 1700000200}}}},
+      "server": true
+    }
+  ]
+}

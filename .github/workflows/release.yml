@@ -1,0 +1,76 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundles: dmg,app
+          - os: ubuntu-22.04
+            bundles: deb,rpm
+            # rpm no admite la tilde de productName en el nombre del paquete
+            config: '{"productName":"SpoolGuard"}'
+          - os: windows-latest
+            bundles: msi
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Dependencias de Linux segun https://v2.tauri.app/start/prerequisites/
+      # y https://v2.tauri.app/distribute/pipelines/github/
+      # (libayatana-appindicator3-dev: la app usa la feature tray-icon).
+      - name: Dependencias de Linux
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - run: npm ci
+
+      # Tauri v2 no genera .pkg: en macOS los targets son app y dmg;
+      # en Windows msi (WiX) y nsis; en Linux deb, rpm y appimage.
+      - name: Compilar y empaquetar
+        run: npx tauri build --bundles ${{ matrix.bundles }} ${{ matrix.config && format('--config ''{0}''', matrix.config) || '' }}
+
+      # Solo macOS: PKG con pkgbuild sobre el .app (sin firmar; para distribucion
+      # firmada agregar --sign "Developer ID Installer: ..." y notarizar).
+      - name: Crear PKG (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          APP="$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)"
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          mkdir -p target/release/bundle/pkg
+          pkgbuild --component "$APP" --install-location /Applications \
+            --identifier cl.cohasa.controlimpresion \
+            --version "$VERSION" \
+            target/release/bundle/pkg/control-impresion-$VERSION.pkg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: control-impresion-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/pkg/*.pkg
+            target/release/bundle/msi/*.msi
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm

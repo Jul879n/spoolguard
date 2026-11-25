@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="dark light">
+<title>SpoolGuard Web</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<header>
+  <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V3h12v6"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="7" rx="2"/></svg></span>
+  <h1>SpoolGuard Web</h1>
+</header>
+
+<div id="contenido">
+<section class="card" aria-labelledby="t-con">
+  <h2 id="t-con">Conexión</h2>
+  <div id="modo" class="seg" role="radiogroup" aria-label="Modo de conexión">
+    <button type="button" role="radio" aria-checked="true" tabindex="0" data-modo="escritorio">Escritorio</button>
+    <button type="button" role="radio" aria-checked="false" tabindex="-1" data-modo="servidor">Servidor</button>
+  </div>
+  <form id="form-srv" class="campos" hidden autocomplete="off">
+    <label for="url">Dirección del servidor</label>
+    <input id="url" type="text" inputmode="url" spellcheck="false" placeholder="https://servidor:8080">
+    <label for="token">Token de la extensión</label>
+    <input id="token" type="password" spellcheck="false" autocomplete="off" placeholder="Pega el token">
+    <button id="guardar" type="submit" class="pri">Guardar y conectar</button>
+  </form>
+  <div id="con-badge" class="badge big"></div>
+  <p id="con-texto" class="mut"></p>
+  <p id="con-ultima" class="mut small"></p>
+  <p id="form-msg" class="small msg" role="status" aria-live="polite"></p>
+  <div class="upd">
+    <button id="upd-buscar" type="button" class="sec">Buscar actualización</button>
+    <div id="upd-badge" class="badge big" hidden></div>
+    <p id="upd-info" class="mut small" role="status" aria-live="polite"></p>
+    <p id="upd-sha" class="mut small sha" hidden></p>
+    <button id="upd-accion" type="button" class="pri" hidden></button>
+  </div>
+</section>
+
+<section class="card" aria-labelledby="t-sitio">
+  <h2 id="t-sitio">Este sitio</h2>
+  <p id="sitio-host" class="host"></p>
+  <div id="sitio-badge" class="badge big"></div>
+  <p id="sitio-regla" class="mut small"></p>
+</section>
+
+<section class="card" aria-labelledby="t-reglas">
+  <h2 id="t-reglas">Reglas activas</h2>
+  <p class="grupo">Bloqueados <span id="n-block" class="cnt">0</span></p>
+  <div id="chips-block" class="chips"></div>
+  <div id="grupo-allow" hidden>
+    <p class="grupo">Solo permitir <span id="n-allow" class="cnt">0</span></p>
+    <div id="chips-allow" class="chips"></div>
+  </div>
+</section>
+
+<button id="refrescar" type="button" class="pri">Actualizar reglas</button>
+</div>
+<script src="popup.js"></script>
+</body>
+</html>

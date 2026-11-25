@@ -1,0 +1,73 @@
+<!doctype html><html lang="es"><meta charset="utf-8"><title>Mockup v2 – Control de impresión</title>
+<style>
+:root{--bg:#f1f5f9;--card:#fff;--ink:#0f172a;--mut:#475569;--line:#cbd5e1;--pri:#1d4ed8;
+--okb:#ecfdf5;--okl:#047857;--okt:#065f46;--bdb:#fef2f2;--bdl:#b91c1c;--bdt:#991b1b;--wnb:#fffbeb;--wnl:#b45309;--wnt:#92400e}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui;background:var(--bg);color:var(--ink);display:flex;height:100vh}
+nav{width:210px;background:#0f172a;color:#cbd5e1;padding:18px 10px;display:flex;flex-direction:column;gap:4px}
+nav h1{font-size:14px;color:#fff;margin:0 10px 18px;letter-spacing:.3px}
+nav a{padding:9px 12px;border-radius:8px}nav a.on{background:#1e293b;color:#fff;font-weight:600}
+nav .foot{margin-top:auto;padding:10px;font-size:12px;color:#94a3b8}
+main{flex:1;padding:26px 30px;overflow:auto}
+h2{margin:26px 0 12px;font-size:16px}h2:first-child{margin-top:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:10px}
+.row{display:flex;align-items:center;gap:14px}.grow{flex:1}.sub{color:var(--mut);font-size:12px}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:6px;border:1px solid;font-size:12px;font-weight:600}
+.badge.ok{background:var(--okb);border-color:var(--okl);color:var(--okt)}
+.badge.bad{background:var(--bdb);border-color:var(--bdl);color:var(--bdt)}
+.badge.warn{background:var(--wnb);border-color:var(--wnl);color:var(--wnt)}
+.badge.off{background:#f8fafc;border-color:var(--line);color:var(--mut)}
+.sw{width:42px;height:24px;border-radius:99px;background:#94a3b8;position:relative;flex:none}.sw.on{background:var(--pri)}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff}.sw.on::after{left:21px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.seg span{padding:6px 14px;background:#fff}.seg .on{background:var(--pri);color:#fff}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.grid .card{margin:0}
+.chip{display:inline-flex;gap:6px;background:#eff6ff;border:1px solid #93c5fd;border-radius:6px;padding:2px 8px;margin:4px 4px 0 0;font-size:12px}
+.btn{display:inline-block;border:1px solid var(--line);border-radius:8px;padding:6px 12px;background:#fff;font-weight:600}.btn.pri{background:var(--pri);border-color:var(--pri);color:#fff}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:10px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid #e2e8f0;font-size:13px}th{color:var(--mut);font-weight:600}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.field{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #e2e8f0}.field:last-child{border:0}
+.note{margin:30px 0 0;color:var(--mut);font-size:12px}
+</style>
+<nav><h1>CONTROL DE IMPRESIÓN</h1><a class="on">Impresoras</a><a>Reglas</a><a>Registro</a><a>Ajustes</a>
+<div class="foot"><span class="badge ok">✓ Control activo</span><br><br>3 impresoras · 2 controladas</div></nav>
+<main>
+<h2>1 · Impresoras</h2>
+<div class="card row"><div class="grow"><b>TSC TH240</b><div class="sub">Red · cola CUPS</div></div><span class="badge bad">✕ Modo bloqueo</span><span class="sub">4 reglas</span><div class="sw on"></div></div>
+<div class="card row"><div class="grow"><b>Printronix_T6304</b><div class="sub">USB</div></div><span class="badge ok">✓ Modo permitir</span><span class="sub">2 reglas</span><div class="sw on"></div></div>
+<div class="card row"><div class="grow"><b>HP LaserJet</b><div class="sub">WiFi</div></div><span class="badge off">— Sin control</span><div class="sw"></div></div>
+<div class="card row"><div class="grow"><b>Zebra ZD420</b><div class="sub">USB</div></div><span class="badge warn">⏸ Pausado</span><div class="sw on"></div></div>
+
+<h2>2 · Reglas — TSC TH240</h2>
+<div class="card row"><b class="grow">Modo</b><div class="seg"><span class="on">Bloquear coincidencias</span><span>Permitir solo coincidencias</span></div></div>
+<div class="grid">
+<div class="card"><b>Aplicaciones</b><div><span class="chip">Microsoft Word ✕</span><span class="chip">*.docx ✕</span></div><p><span class="btn">＋ Elegir de instaladas</span> <span class="btn">Escribir patrón</span></p></div>
+<div class="card"><b>Sitios web</b><div><span class="chip">facebook.com ✕</span></div><p><span class="btn">＋ Agregar dominio</span></p><div class="sub">Requiere extensión de navegador</div></div>
+<div class="card"><b>IP / equipos</b><div><span class="chip">192.168.1.0/24 ✕</span><span class="chip">10.0.0.5 ✕</span></div><p><span class="btn">＋ Agregar IP o rango</span></p></div>
+</div>
+
+<h2>3 · Registro (interceptados e impresiones)</h2>
+<p><span class="btn">Todos</span> <span class="btn">Permitidos</span> <span class="btn">Bloqueados</span> <span class="btn">Impresora ▾</span> <span class="btn">Fecha ▾</span> <span class="btn pri">Exportar CSV</span></p>
+<table><tr><th>Hora</th><th>Estado</th><th>Documento</th><th>Impresora</th><th>Usuario</th><th>Origen</th><th>Motivo</th></tr>
+<tr><td>12:41:07</td><td><span class="badge ok">✓ Impreso</span></td><td>etiqueta_1042.btw</td><td>TSC TH240</td><td>mac</td><td>local</td><td>Sin coincidencia</td></tr>
+<tr><td>12:38:52</td><td><span class="badge bad">✕ Bloqueado</span></td><td>Microsoft Word - informe.docx</td><td>TSC TH240</td><td>mac</td><td>192.168.1.77</td><td>Aplicación: *.docx</td></tr>
+<tr><td>12:30:10</td><td><span class="badge warn">⏸ Liberado (pausa)</span></td><td>notas.txt</td><td>Zebra ZD420</td><td>mac</td><td>local</td><td>Control pausado</td></tr></table>
+
+<h2>4 · Ajustes</h2>
+<div class="cols">
+<div class="card"><b>Comportamiento del control</b>
+<div class="field">Trabajos sin datos suficientes<span class="seg"><span>Permitir</span><span class="on">Bloquear</span></span></div>
+<div class="field">Intervalo de revisión<span class="btn">1 s ▾</span></div>
+<div class="field">Notificar bloqueos<div class="sw on"></div></div>
+<div class="field">Notificar impresiones permitidas<div class="sw"></div></div></div>
+<div class="card"><b>Aplicación</b>
+<div class="field">Iniciar con el sistema<div class="sw on"></div></div>
+<div class="field">Tema<span class="seg"><span>Claro</span><span class="on">Oscuro</span><span>Sistema</span></span></div>
+<div class="field">Contraseña de administrador<span class="btn">Cambiar</span></div>
+<div class="field">Idioma<span class="btn">Español ▾</span></div></div>
+<div class="card"><b>Datos</b>
+<div class="field">Reglas<span><span class="btn">Exportar</span> <span class="btn">Importar</span></span></div>
+<div class="field">Retención del registro<span class="btn">90 días ▾</span></div>
+<div class="field">Registro<span><span class="btn">Exportar CSV</span> <span class="btn">Borrar</span></span></div></div>
+</div>
+<p class="note">Las 4 secciones se muestran juntas solo en este mockup; en la app son vistas separadas (barra lateral). Estados: ícono + texto + borde completo, no solo color.</p>
+</main></html>

@@ -1,0 +1,5 @@
+go test fuzz v1
+[]byte("{\"enabled\":true,\"mode\":\"block\",Aapps\":[\"*.docx\"],\"sites\":[\"a.cl\"],\"ips\":[\"10.0.0.0/8\",\"fe80::/10\"]}")
+string("doc.docx")
+string("a.cl")
+string("10.1.2.3")

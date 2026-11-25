@@ -1,0 +1,18 @@
+#!/bin/sh
+# Backend de CUPS de SpoolGuard (solo Docker): envuelve el backend real de la cola (device-uri «spoolguard:socket://IP:9100»)
+# y espera el veredicto de control-server antes de enviar datos a la impresora. Sin veredicto en 10 s imprime.
+[ $# -eq 0 ] && exit 0   # sin argumentos CUPS lo invoca para descubrir dispositivos: no ofrece ninguno
+URI="${DEVICE_URI#spoolguard:}"
+V="/var/lib/spoolguard/verdicts/${PRINTER}-$1"
+v=""; i=0
+while [ "$i" -lt 100 ]; do
+  if [ -f "$V" ]; then v=$(cat "$V" 2>/dev/null); break; fi
+  sleep 0.1; i=$((i + 1))
+done
+if [ "$v" = deny ]; then
+  echo "INFO: bloqueado por SpoolGuard" >&2
+  [ -z "${6:-}" ] && cat >/dev/null 2>&1
+  exit 0
+fi
+DEVICE_URI="$URI"; export DEVICE_URI
+exec "/usr/lib/cups/backend/${URI%%:*}" "$@"

@@ -1,0 +1,53 @@
+name: e2e-windows
+# Prueba extremo a extremo de la app completa en un runner Windows real:
+# compila el .msi (igual que release.yml), lo instala en silencio y ejecuta la app instalada con
+# impresoras virtuales (Microsoft Print to PDF + PORTPROMPT). Ver scripts/e2e_windows.ps1.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "src-tauri/**"
+      - "core/**"
+      - "extension/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "package*.json"
+      - "scripts/e2e_windows.ps1"
+      - ".github/workflows/e2e-windows.yml"
+jobs:
+  e2e:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      - run: npm ci
+      - name: Compilar MSI
+        run: npx tauri build --bundles msi
+      - name: Prueba E2E (instala el MSI y ejecuta la app instalada)
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem target/release/bundle/msi/*.msi | Select-Object -First 1).FullName
+          ./scripts/e2e_windows.ps1 -Msi $msi -Out "$env:RUNNER_TEMP\e2e-out" *>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\e2e-console.txt"
+          exit $LASTEXITCODE
+      - name: Reunir artefactos
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force e2e-artifacts | Out-Null
+          Copy-Item "$env:RUNNER_TEMP\e2e-out\*" e2e-artifacts -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item "$env:RUNNER_TEMP\e2e-console.txt" e2e-artifacts -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-windows
+          path: e2e-artifacts

@@ -1,0 +1,7 @@
+{
+  "name": "cl.cohasa.controlimpresion",
+  "description": "Control de impresión: host de reglas",
+  "path": "/RUTA/ABSOLUTA/native_host",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://ID_DE_LA_EXTENSION/"]
+}

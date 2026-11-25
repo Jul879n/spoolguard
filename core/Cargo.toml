@@ -1,0 +1,19 @@
+[package]
+name = "control-core"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+getrandom = "0.3"
+rusqlite = { version = "0.43.0", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3.5.2", default-features = false, features = ["rustls"] }
+
+[[bin]]
+name = "cups-poc"
+path = "src/bin/cups_poc.rs"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_Threading"] }

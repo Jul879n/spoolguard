@@ -1,0 +1,56 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SpoolGuard",
+  "version": "0.1.0",
+  "identifier": "cl.cohasa.controlimpresion",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "SpoolGuard",
+        "width": 1000,
+        "height": 680,
+        "minWidth": 760,
+        "minHeight": 500,
+        "visible": true,
+        "center": true,
+        "transparent": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "windowEffects": {
+          "effects": [
+            "sidebar",
+            "mica"
+          ],
+          "state": "active"
+        }
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'"
+    },
+    "macOSPrivateApi": true
+  },
+  "bundle": {
+    "active": true,
+    "resources": {
+      "../extension": "extension"
+    },
+    "targets": "all",
+    "publisher": "Cohasa",
+    "category": "Utility",
+    "shortDescription": "Control de impresión por reglas",
+    "longDescription": "Retiene los trabajos de la cola de impresión del sistema (CUPS en macOS y Linux, spooler en Windows) y los libera o cancela según reglas por aplicación, sitio e IP o equipo de origen.",
+    "copyright": "Copyright © 2026 Cohasa. Todos los derechos reservados.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

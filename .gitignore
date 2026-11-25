@@ -1,0 +1,14 @@
+target/
+node_modules/
+build.log
+*.log
+work/
+shot.png
+w.txt
+*.test
+src-tauri/gen/
+dist/
+
+# Go (modo servidor)
+/control-server
+/server/control-server

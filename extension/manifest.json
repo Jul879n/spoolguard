@@ -1,0 +1,64 @@
+{
+  "manifest_version": 3,
+  "name": "SpoolGuard Web",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmdud8RIjhw+SFBt2LkTC7pu1TAiFtznlm1lae17qPz+SkhqcDbsNVZq9LMn/xzYfJGo6X4CL3mTo+KPYNWizPxmDNt/gZBH5t9cFDKyBUUWeWKsZKNCUKYUpQcQ4uOISp8IDc/bMDtuRXAtthrmRHnkSA/uMY7z4o85M7+sDxatAjZ0CldNDqSuNJiB0MnZQde/3LLJb6TbOY0Ok+8wuhKFfWGpm5DhQ2vzudqtckgsQXxu0USbzp6sygTpLX6ypbn+ZVgKFFO8iXwdmQOtbpahILiSV1/j8kBKYK83BOhFzw98Evp0G1qhlngGEOYNbOQkpcEHeOfQa/APrbTqgGwIDAQAB",
+  "description": "Bloquea la impresión desde sitios según las reglas de SpoolGuard.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": [
+    "nativeMessaging",
+    "storage",
+    "alarms",
+    "activeTab"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SpoolGuard Web",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "page.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "controlimpresion@cohasa.cl",
+      "strict_min_version": "128.0"
+    }
+  }
+}

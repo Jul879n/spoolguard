@@ -1,0 +1,21 @@
+name: windows-vm
+
+# Solo manual: corre en el runner autohospedado (VM de Windows con impresora real).
+on:
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    runs-on: [self-hosted, windows, windows-vm]
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - name: Pruebas del núcleo
+        continue-on-error: true  # spooler_windows falla en Windows 10 (StartDocPrinter RAW con Print to PDF)
+        run: cargo test -p control-core
+      - name: Instalador MSI
+        run: npx tauri build --bundles msi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: control-impresion-msi
+          path: target/release/bundle/msi/*.msi

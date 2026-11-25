@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SpoolGuard - Tokens</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="lock" hidden>
+  <form id="lockForm" class="card lockbox">
+    <b>Acceso protegido</b>
+    <input id="lockPw" type="password" placeholder="Contraseña de administrador" autocomplete="current-password" aria-label="Contraseña de administrador">
+    <span id="lockErr" class="err" role="alert"></span>
+    <button class="btn pri" type="submit">Entrar</button>
+  </form>
+</div>
+<main style="padding-top:26px">
+  <h2>Tokens de extensión y de equipo</h2>
+  <p class="sub">Cada equipo con la extensión SpoolGuard Web usa su propio token de <b>extensión</b>; cada PC con la app de escritorio que envía sus eventos al servidor usa un token de <b>equipo</b> (solo puede enviar eventos, no leerlos). Ninguno es la contraseña de administrador. El token se muestra una sola vez al crearlo. <a href="/">Volver al panel</a></p>
+  <form id="nuevo" class="card add" style="margin:12px 0">
+    <select id="tipo" aria-label="Tipo de token"><option value="ext">Extensión de navegador</option><option value="device">Equipo (app de escritorio)</option></select>
+    <input id="nombre" maxlength="60" placeholder="Etiqueta (p. ej. PC Bodega)" aria-label="Etiqueta del token" required>
+    <button class="btn pri" type="submit">Crear token</button>
+  </form>
+  <div id="creado" class="card" hidden>
+    <h3>Token creado: cópialo ahora</h3>
+    <div class="add"><input id="valor" readonly aria-label="Token creado"><button class="btn" id="copiar" type="button">Copiar</button></div>
+    <p class="sub">No se podrá volver a ver. Pégalo en el popup de la extensión (modo Servidor) o, si es de equipo, en Ajustes → Enviar eventos al servidor de la app de escritorio, junto con la dirección de este servidor.</p>
+  </div>
+  <table>
+    <thead><tr><th>Etiqueta</th><th>Tipo</th><th>Creado</th><th>Último uso</th><th></th></tr></thead>
+    <tbody id="lista"></tbody>
+  </table>
+  <p id="vacio" class="sub" hidden>No hay tokens.</p>
+  <span id="err" class="err" role="alert"></span>
+</main>
+<script src="tokens.js"></script>
+</body>
+</html>
