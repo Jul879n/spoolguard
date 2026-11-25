@@ -35,9 +35,13 @@ Las capturas usan datos de ejemplo.
 
 ## Videos
 
-| Introducción (~45 s) | Tutorial (~3 min) |
-|---|---|
-| [![Introducción](docs/media/intro.png)](docs/media/intro.mp4) | [![Tutorial](docs/media/tutorial.png)](docs/media/tutorial.mp4) |
+**Introducción (~45 s)**
+
+https://github.com/user-attachments/assets/821313d9-f750-49e6-b1d5-b49086383b8d
+
+**Tutorial (~3 min)**
+
+https://github.com/user-attachments/assets/e7e5c7c8-608a-458e-8afa-51280af235d3
 
 Con subtítulos y voz sintética en español (generada localmente); sin música de fondo. Hechos con HyperFrames.
 
