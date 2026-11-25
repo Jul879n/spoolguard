@@ -36,7 +36,8 @@ jobs:
       - name: Pruebas de la lista de apps
         run: cargo test -p control-impresion apps_tests -- --nocapture
       - name: Pruebas del núcleo (reglas, host, spooler en Windows)
-        run: cargo test -p control-core -- --nocapture
+        # Una a una: los tests de spooler_windows comparten el spooler real y compiten si corren en paralelo.
+        run: cargo test -p control-core -- --nocapture --test-threads=1
       # Compila como usuario normal y ejecuta solo este binario con sudo (root administra CUPS);
       # así los archivos de target/ no quedan con dueño root. CUPS_E2E=1 activa la prueba.
       - name: Prueba CUPS real (Linux)
