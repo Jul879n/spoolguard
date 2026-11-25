@@ -14,8 +14,8 @@
 # CONTROL_ADMIN_PASSWORD_FILE=/run/secrets/admin_password (Docker secrets) en lugar de la variable.
 #
 # PRINTERS = "Nombre=uri;Nombre2=uri2". Cada entrada ejecuta al arrancar:
-#   lpadmin -p NOMBRE -E -v socket://IP:9100 -m raw -o printer-is-shared=true
-# También se puede hacer a mano: docker compose exec control lpadmin -p NOMBRE -E -v socket://IP:9100 -m raw
+#   lpadmin -p NOMBRE -E -v spoolguard:socket://IP:9100 -m raw -o printer-is-shared=true
+# También se puede hacer a mano: docker compose exec control lpadmin -p NOMBRE -E -v spoolguard:socket://IP:9100 -m raw
 #
 # IMPORTANTE: restringe la impresora a la IP de este servidor (filtro de IP de la impresora o firewall en 9100/515/631);
 # si no, quien imprima directo a la impresora se salta el control.

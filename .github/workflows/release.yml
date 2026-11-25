@@ -11,27 +11,39 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            bundles: dmg,app
-          - os: ubuntu-22.04
+          - name: macos-arm64
+            os: macos-latest
+            bundles: dmg
+            src: target/release/bundle/dmg/*.dmg
+            out: macos-arm64.dmg
+          - name: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: dmg
+            src: target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+            out: macos-x86_64.dmg
+          - name: linux
+            os: ubuntu-22.04
             bundles: deb,rpm
             # rpm no admite la tilde de productName en el nombre del paquete
             config: '{"productName":"SpoolGuard"}'
-          - os: windows-latest
+          - name: windows
+            os: windows-latest
             bundles: msi
+            src: target/release/bundle/msi/*.msi
+            out: windows-x64.msi
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       # Dependencias de Linux segun https://v2.tauri.app/start/prerequisites/
-      # y https://v2.tauri.app/distribute/pipelines/github/
       # (libayatana-appindicator3-dev: la app usa la feature tray-icon).
       - name: Dependencias de Linux
         if: matrix.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
-            libxdo-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
+            libxdo-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils rpm
 
       - uses: actions/setup-node@v4
         with:
@@ -39,38 +51,103 @@ jobs:
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
+          key: ${{ matrix.name }}
 
       - run: npm ci
 
-      # Tauri v2 no genera .pkg: en macOS los targets son app y dmg;
-      # en Windows msi (WiX) y nsis; en Linux deb, rpm y appimage.
       - name: Compilar y empaquetar
-        run: npx tauri build --bundles ${{ matrix.bundles }} ${{ matrix.config && format('--config ''{0}''', matrix.config) || '' }}
-
-      # Solo macOS: PKG con pkgbuild sobre el .app (sin firmar; para distribucion
-      # firmada agregar --sign "Developer ID Installer: ..." y notarizar).
-      - name: Crear PKG (macOS)
-        if: matrix.os == 'macos-latest'
+        shell: bash
         run: |
-          APP="$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)"
+          ARGS=(--bundles "${{ matrix.bundles }}")
+          if [ -n "${{ matrix.target }}" ]; then ARGS+=(--target "${{ matrix.target }}"); fi
+          if [ -n '${{ matrix.config }}' ]; then ARGS+=(--config '${{ matrix.config }}'); fi
+          npx tauri build "${ARGS[@]}"
+
+      # Nombres finales: SpoolGuard-<versión>-<sistema>-<arquitectura>.<ext>
+      - name: Renombrar
+        shell: bash
+        run: |
           VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          mkdir -p target/release/bundle/pkg
-          pkgbuild --component "$APP" --install-location /Applications \
-            --identifier cl.cohasa.controlimpresion \
-            --version "$VERSION" \
-            target/release/bundle/pkg/control-impresion-$VERSION.pkg
+          mkdir -p dist
+          if [ "${{ matrix.name }}" = linux ]; then
+            cp target/release/bundle/deb/*.deb "dist/SpoolGuard-${VERSION}-linux-amd64.deb"
+            cp target/release/bundle/rpm/*.rpm "dist/SpoolGuard-${VERSION}-linux-x86_64.rpm"
+          else
+            cp ${{ matrix.src }} "dist/SpoolGuard-${VERSION}-${{ matrix.out }}"
+          fi
+          ls -la dist
 
       - uses: actions/upload-artifact@v4
         with:
-          name: control-impresion-${{ matrix.os }}
+          name: dist-${{ matrix.name }}
           if-no-files-found: error
-          path: |
-            target/release/bundle/dmg/*.dmg
-            target/release/bundle/pkg/*.pkg
-            target/release/bundle/msi/*.msi
-            target/release/bundle/deb/*.deb
-            target/release/bundle/rpm/*.rpm
+          path: dist/*
+
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Empaquetar extensión
+        run: |
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          mkdir -p dist
+          (cd extension && zip -r -X "../dist/SpoolGuard-extension-${VERSION}.zip" .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-extension
+          if-no-files-found: error
+          path: dist/*
+
+  publish:
+    needs: [build, extension]
+    # Sin etiqueta (workflow_dispatch) solo se compila: no se publica.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Crear release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ls -la dist
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --generate-notes --title "SpoolGuard ${VERSION}" dist/*
+
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Versión
+        id: v
+        run: echo "version=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          # Sin etiqueta (workflow_dispatch) solo se construye.
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: |
+            ghcr.io/jul879n/spoolguard:${{ steps.v.outputs.version }}
+            ghcr.io/jul879n/spoolguard:latest

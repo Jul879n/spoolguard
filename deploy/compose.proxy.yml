@@ -1,0 +1,39 @@
+# SpoolGuard con HTTPS: Caddy publica el panel y obtiene el certificado solo.
+# Requiere un dominio que apunte a este servidor y los puertos 80/443 abiertos. Guía: docs/docker.md
+#
+#   export CONTROL_ADMIN_PASSWORD='una-clave-larga'
+#   export PANEL_DOMAIN=panel.ejemplo.cl
+#   docker compose -f compose.proxy.yml up -d
+services:
+  control:
+    image: ghcr.io/jul879n/spoolguard:${SPOOLGUARD_TAG:-latest}
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${IPP_BIND:-0.0.0.0}:631:631"       # IPP: los PC imprimen aquí
+      # El panel (8080) NO se publica: solo Caddy lo alcanza por la red interna.
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    environment:
+      CONTROL_ADMIN_PASSWORD: ${CONTROL_ADMIN_PASSWORD:?define CONTROL_ADMIN_PASSWORD (no hay contraseña por defecto)}
+      PRINTERS: ${PRINTERS:-}
+      CONTROL_TRUST_PROXY: "1"   # IP real del cliente desde X-Forwarded-For (seguro: el 8080 no está publicado)
+    volumes:
+      - control-data:/data
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [control]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PANEL_DOMAIN: ${PANEL_DOMAIN:?define PANEL_DOMAIN (dominio del panel)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+volumes:
+  control-data:
+  caddy-data:

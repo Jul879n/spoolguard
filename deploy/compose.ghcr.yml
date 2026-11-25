@@ -1,0 +1,28 @@
+# SpoolGuard (modo servidor) con la imagen publicada. Guía: docs/docker.md
+#
+#   export CONTROL_ADMIN_PASSWORD='una-clave-larga'
+#   export PRINTERS='Oficina=socket://192.168.1.50:9100'
+#   docker compose -f compose.ghcr.yml up -d
+#
+# Panel: http://127.0.0.1:8080 (local). Cola para los PC: ipp://SERVIDOR:631/printers/Oficina
+# Restringe la impresora a la IP de este servidor (9100/515/631) o se salta el control.
+services:
+  control:
+    image: ghcr.io/jul879n/spoolguard:${SPOOLGUARD_TAG:-latest}
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${IPP_BIND:-0.0.0.0}:631:631"       # IPP: los PC imprimen aquí
+      - "${PANEL_BIND:-127.0.0.1}:8080:8080" # panel web: solo local por defecto
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    environment:
+      CONTROL_ADMIN_PASSWORD: ${CONTROL_ADMIN_PASSWORD:?define CONTROL_ADMIN_PASSWORD (no hay contraseña por defecto)}
+      PRINTERS: ${PRINTERS:-}
+      # CONTROL_RELEASE_ON_EXIT: "1"   # liberar las colas al detener (por defecto quedan retenidas)
+    volumes:
+      - control-data:/data
+volumes:
+  control-data:

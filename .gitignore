@@ -12,3 +12,6 @@ dist/
 # Go (modo servidor)
 /control-server
 /server/control-server
+
+deploy/.env
+deploy/admin_password.txt

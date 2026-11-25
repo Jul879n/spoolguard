@@ -1,6 +1,6 @@
 # Instalación de SpoolGuard
 
-Identificador de la app: `cl.cohasa.controlimpresion`. Versión 0.1.0.
+Identificador de la app: `cl.cohasa.controlimpresion`. Versión 0.2.0.
 
 ## Estado de verificación
 
@@ -9,46 +9,49 @@ Identificador de la app: `cl.cohasa.controlimpresion`. Versión 0.1.0.
 - **Windows:** el spooler se probó en un runner real de CI con una impresora virtual (Microsoft Print to PDF). La interfaz **no** se ha probado en un Windows real ni el `.msi` instalado; probar con la impresora del cliente antes de desplegar (requiere permisos de administrador).
 - **Extensión:** probada en Chrome. Edge y Firefox sin probar.
 
-## Descargas (release v0.1.0)
+## Descargas
+
+Desde la [última release](https://github.com/Jul879n/spoolguard/releases/latest) (`<versión>`: por ejemplo `0.2.0`):
 
 | Sistema | Archivo |
 |---|---|
-| macOS Intel | `Control-de-impresion-0.1.0-macos-x86_64.dmg`, `Control-de-impresion-0.1.0-macos-x86_64.pkg`, `Control-de-impresion-macos-x86_64.zip` (la app comprimida) |
-| macOS Apple Silicon | `Control-de-impresion-0.1.0-macos-arm64.dmg` |
-| Windows (x64) | `Control-de-impresion-0.1.0-windows-x64.msi` |
-| Debian/Ubuntu | `Control-de-impresion-0.1.0-linux-amd64.deb` |
-| Fedora/RHEL/openSUSE | `Control-de-impresion-0.1.0-linux-x86_64.rpm` |
-| Extensión de navegador | `extension-navegador.zip` |
+| macOS Apple Silicon (M1 o posterior) | `SpoolGuard-<versión>-macos-arm64.dmg` |
+| macOS Intel | `SpoolGuard-<versión>-macos-x86_64.dmg` |
+| Windows (x64) | `SpoolGuard-<versión>-windows-x64.msi` |
+| Debian / Ubuntu | `SpoolGuard-<versión>-linux-amd64.deb` |
+| Fedora / RHEL / openSUSE | `SpoolGuard-<versión>-linux-x86_64.rpm` |
+| Extensión de navegador | `SpoolGuard-extension-<versión>.zip` |
+| Servidor | imagen `ghcr.io/jul879n/spoolguard` (ver [docker.md](docker.md)) |
 
-Los instaladores **no están firmados ni notarizados**, por eso el sistema muestra un aviso la primera vez. El workflow `.github/workflows/release.yml` genera dmg y pkg (macOS, el pkg con `pkgbuild` sin firmar), msi (Windows), deb y rpm (Linux) al subir una etiqueta `v*`.
+Los instaladores **no están firmados ni notarizados**, por eso el sistema muestra un aviso la primera vez. El workflow `.github/workflows/release.yml` los genera en CI al subir una etiqueta `v*`.
 
 ## 1. macOS
 
-1. Abrir el `.dmg` y arrastrar "SpoolGuard" a Aplicaciones, o ejecutar el `.pkg`. Elegir el archivo según el procesador (Intel: `x86_64`, Apple Silicon: `arm64`).
-2. Gatekeeper bloqueará la app por no estar firmada. Para abrirla: clic derecho sobre la app > Abrir > Abrir; o intentar abrirla una vez y luego Ajustes del Sistema > Privacidad y seguridad > "Abrir de todos modos". Con el `.pkg`, el mismo aviso aparece al ejecutarlo: clic derecho > Abrir.
-3. Abrir la app, aceptar las notificaciones y, en Ajustes, activar "Iniciar con el sistema".
+1. Abrir el `.dmg` que corresponda al procesador (menú Apple → «Acerca de este Mac»: «Apple M…» = `arm64`; «Intel» = `x86_64`) y arrastrar «SpoolGuard» a Aplicaciones.
+2. Gatekeeper bloqueará la app por no estar firmada. Para abrirla: clic derecho sobre la app → **Abrir** → **Abrir**; o intentar abrirla una vez y luego Ajustes del Sistema → Privacidad y seguridad → «Abrir de todos modos».
+3. Abrir la app, aceptar las notificaciones y seguir el asistente (ver [primeros-pasos.md](primeros-pasos.md)): en el primer paso se activa la [protección previa](proteccion-previa.md), que pide la contraseña de administrador.
 
-Inicio automático: usa un LaunchAgent de usuario con `--minimized` (no es un servicio de sistema: solo funciona con sesión iniciada). Arranca oculta en la barra de menús. Cerrar la ventana (X o Cmd+W) cierra la app y libera las colas; mientras esté oculta en la barra, "Salir" hace lo mismo.
+Inicio automático: usa un LaunchAgent de usuario con `--minimized` (no es un servicio de sistema: solo funciona con sesión iniciada). Arranca oculta en la barra de menús. Cerrar la ventana (X o Cmd+W) cierra la app y libera las colas.
 
 ## 2. Linux
 
 ```
-sudo apt install ./Control-de-impresion-0.1.0-linux-amd64.deb
+sudo apt install ./SpoolGuard-<versión>-linux-amd64.deb
 # o
-sudo dnf install ./Control-de-impresion-0.1.0-linux-x86_64.rpm
+sudo dnf install ./SpoolGuard-<versión>-linux-x86_64.rpm
 ```
 
-Requiere CUPS (`lpstat`, `lpadmin`, `lp`, `cancel`, `ipptool`). La bandeja usa `libayatana-appindicator3`. El paquete se llama "SpoolGuard" (sin tilde: el rpm no la admite). Los paquetes no están firmados.
+Requiere CUPS (`lpstat`, `lpadmin`, `lp`, `cancel`, `ipptool`). La bandeja usa `libayatana-appindicator3`. Nombre de producto «SpoolGuard» (el nombre exacto del paquete instalado no está verificado). Los paquetes no están firmados. La protección previa se activa desde el asistente (usa `pkexec`) o con `scripts/guard-cups.sh` ([guía](proteccion-previa.md)).
 
 ## 3. Windows
 
 Archivo `.msi`. Doble clic, o silencioso como administrador:
 
 ```
-msiexec /i "Control-de-impresion-0.1.0-windows-x64.msi" /qn
+msiexec /i "SpoolGuard-<versión>-windows-x64.msi" /qn
 ```
 
-SmartScreen mostrará "Windows protegió su PC" por ser un instalador sin firmar: pulsar "Más información" > "Ejecutar de todas formas". Ver el estado de verificación arriba.
+SmartScreen mostrará «Windows protegió su PC» por ser un instalador sin firmar: pulsar **Más información** → **Ejecutar de todas formas**. Windows no necesita protección previa: el spooler retiene los trabajos. Ver el estado de verificación arriba.
 
 ## 4. Extensión de navegador (opcional, para reglas por sitio)
 
@@ -62,7 +65,7 @@ Guía detallada para usuarios: `docs/instalar-extension.md`.
 - **Firefox:** la carga es temporal. Se abre `about:debugging`; pulsar "Este Firefox" > "Cargar complemento temporal…" y elegir `manifest.firefox.json` (en la ruta copiada). Se pierde al cerrar Firefox.
 - Si el navegador está administrado por la organización puede que no se abra la página por sí solo; en ese caso abrirla a mano y usar la ruta copiada.
 
-**Descargar extensión (.zip).** Guarda un `.zip` con la carpeta de la extensión (por defecto `control-impresion-extension.zip`), para llevarla a otro equipo o descomprimirla donde se necesite. Es el mismo contenido que `extension-navegador.zip` del release.
+**Descargar extensión (.zip).** Guarda un `.zip` con la carpeta de la extensión (por defecto `control-impresion-extension.zip`), para llevarla a otro equipo o descomprimirla donde se necesite. Es el mismo contenido que `SpoolGuard-extension-<versión>.zip` del release.
 
 También se puede usar "Abrir carpeta de la extensión" y "Abrir chrome://extensions" y cargar la carpeta a mano.
 
@@ -103,3 +106,10 @@ El registro también se exporta a CSV desde la vista Registro.
 - El archivo contiene reglas por impresora, la regla global y Ajustes, sin la contraseña de administrador. Al importar se reemplazan reglas y ajustes del PC destino, se conserva su contraseña y se omiten las impresoras que ese PC no tenga.
 - Las reglas se indexan por nombre de impresora. Para cada impresora del archivo que sí existe en el destino se aplica la retención; las demás se descartan sin error. Si falla `lpadmin` en alguna (permisos), la importación se detiene y no reemplaza la configuración.
 - Importar requiere los mismos permisos de la sección 5.
+
+## 8. Desinstalación
+
+1. Quitar la protección previa (macOS/Linux), con la app aún instalada: Ajustes → «Protección previa a la impresión» → Desactivar; o `sudo scripts/guard-cups.sh uninstall` ([guía](proteccion-previa.md)).
+2. En Ajustes, desactivar «Iniciar con el sistema». Salir de la app (libera las colas).
+3. **macOS:** mover «SpoolGuard» de Aplicaciones a la Papelera. **Windows:** Configuración → Aplicaciones → SpoolGuard → Desinstalar (o `msiexec /x` con el `.msi`). **Debian/Ubuntu:** `sudo apt remove spoolguard` (nombre por confirmar con `dpkg -l | grep -i spoolguard`). **Fedora:** `sudo dnf remove spoolguard` (ídem con `rpm -qa | grep -i spoolguard`).
+4. Opcional: borrar el directorio de datos (sección 6); contiene reglas y registro.
