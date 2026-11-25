@@ -1,6 +1,6 @@
 # Prueba extremo a extremo de la app completa en Windows (ver .github/workflows/e2e-windows.yml).
 # Instala el MSI en silencio, lanza la app instalada con --minimized y CONTROL_IMPRESION_DIR,
-# envia trabajos RAW al spooler y comprueba log.jsonl; luego mata la app y verifica el guardian.
+# envia trabajos RAW al spooler y comprueba el registro (events.db); luego mata la app y verifica el guardian.
 param([Parameter(Mandatory)][string]$Msi, [Parameter(Mandatory)][string]$Out)
 $ErrorActionPreference = 'Continue'
 New-Item -ItemType Directory -Force $Out | Out-Null
@@ -36,12 +36,12 @@ if (-not $exe) { Write-Host 'Sin binario instalado; abortando'; exit 1 }
 $inst = $exe.DirectoryName
 Get-ChildItem $inst -Recurse | Select-Object -First 40 FullName | Out-String | Write-Host
 Check (Test-Path (Join-Path $inst 'extension')) "recurso extension/ instalado junto al binario"
-$lnk = Get-ChildItem 'C:\ProgramData\Microsoft\Windows\Start Menu',"$env:APPDATA\Microsoft\Windows\Start Menu" -Recurse -Filter '*.lnk' -ErrorAction SilentlyContinue | Where-Object Name -like '*impresi*'
+$lnk = Get-ChildItem 'C:\ProgramData\Microsoft\Windows\Start Menu',"$env:APPDATA\Microsoft\Windows\Start Menu" -Recurse -Filter '*.lnk' -ErrorAction SilentlyContinue | Where-Object Name -like '*SpoolGuard*'
 Write-Host "Accesos del menu Inicio: $($lnk.FullName -join ', ')"
 Check ($lnk.Count -ge 1) "acceso directo en menu Inicio"
 $run = @(); foreach ($k in 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run','HKCU:\Software\Microsoft\Windows\CurrentVersion\Run') { $run += (Get-ItemProperty $k -ErrorAction SilentlyContinue).PSObject.Properties | Where-Object { $_.Value -like '*control-impresion*' } }
 Write-Host "Entradas de inicio automatico tras instalar (esperado: ninguna hasta activarlo en Ajustes): $($run.Count)"
-Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object DisplayName -like '*impresi*' | Select-Object DisplayName, DisplayVersion, Publisher, InstallLocation | Format-List | Out-String | Write-Host
+Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object DisplayName -like '*SpoolGuard*' | Select-Object DisplayName, DisplayVersion, Publisher, InstallLocation | Format-List | Out-String | Write-Host
 
 # ---- 2. Impresoras virtuales ----
 Write-Host "== 2. Impresoras virtuales"
@@ -136,7 +136,7 @@ $r = [Spool]::Submit('CtrlE2E','sonda.docx'); Write-Host "sonda -> $r"
 while (((Get-Date) - $t0).TotalSeconds -lt 10) {
   $ps = (Get-Printer -Name CtrlE2E).PrinterStatus
   $js = (@(Get-PrintJob -PrinterName CtrlE2E -ErrorAction SilentlyContinue) | ForEach-Object { "$($_.DocumentName)[$($_.JobStatus)]" }) -join ';'
-  $cur = "printer=$ps jobs=$js log=$((Get-Item "$Data\log.jsonl").Length)B"
+  $cur = "printer=$ps jobs=$js log=$(if (Test-Path "$Data\events.db") { (Get-Item "$Data\events.db").Length } else { -1 })B"
   if ($cur -ne $prev) { Write-Host ("{0:N1}s {1}" -f ((Get-Date) - $t0).TotalSeconds, $cur); $prev = $cur }
   Start-Sleep -Milliseconds 100
 }
@@ -145,16 +145,27 @@ foreach ($pr in 'CtrlE2E','CtrlE2E2') { foreach ($d in 'informe.docx','planilla.
 } }
 for ($i = 0; $i -lt 16; $i++) {
   $js = @(Get-PrintJob -PrinterName CtrlE2E -ErrorAction SilentlyContinue) + @(Get-PrintJob -PrinterName CtrlE2E2 -ErrorAction SilentlyContinue)
-  $sz = if (Test-Path "$Data\log.jsonl") { (Get-Item "$Data\log.jsonl").Length } else { -1 }
+  $sz = if (Test-Path "$Data\events.db") { (Get-Item "$Data\events.db").Length } else { -1 }
   Write-Host ("t+{0}s app viva={1} log={2}B jobs: {3}" -f $i, [bool](Get-Process -Id $app.Id -ErrorAction SilentlyContinue), $sz, (($js | ForEach-Object { "$($_.PrinterName)/$($_.DocumentName)[$($_.JobStatus)]" }) -join '; '))
   Start-Sleep 1
 }
 Write-Host '--- PrintService/Operational'
 Get-WinEvent -LogName 'Microsoft-Windows-PrintService/Operational' -MaxEvents 60 -ErrorAction SilentlyContinue | Sort-Object TimeCreated | ForEach-Object { "{0:HH:mm:ss.fff} {1} {2}" -f $_.TimeCreated, $_.Id, ($_.Message -replace '\s+',' ') } | Write-Host
 Shot 'desktop-2-trabajos'
-$logf = Join-Path $Data 'log.jsonl'
-$log = @(); if (Test-Path $logf) { $log = @(Get-Content $logf | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json }) }
-Write-Host "log.jsonl:"; Get-Content $logf -ErrorAction SilentlyContinue | Write-Host
+# El registro vive en events.db (SQLite): se lee con el Python del runner (sqlite3 de la biblioteca estandar).
+$pyf = Join-Path $env:TEMP 'leer_eventos.py'
+Set-Content -Path $pyf -Encoding ascii -Value @'
+import sqlite3, json, sys
+c = sqlite3.connect(sys.argv[1]); c.row_factory = sqlite3.Row
+print(json.dumps([dict(r) for r in c.execute("select printer, document, decision, reason from events order by ts")]))
+'@
+$log = @()
+$db = Join-Path $Data 'events.db'
+if (Test-Path $db) {
+  $json = python $pyf $db
+  $log = @($json | ConvertFrom-Json | ForEach-Object { $_ | Add-Member -NotePropertyName allowed -NotePropertyValue ($_.decision -eq 'allow') -PassThru })
+}
+Write-Host "eventos:"; $log | Format-Table printer, document, decision, reason | Out-String | Write-Host
 function Entry($pr, $doc) { $log | Where-Object { $_.printer -eq $pr -and $_.document -eq $doc } | Select-Object -First 1 }
 $e = Entry 'CtrlE2E' 'informe.docx';  Check ($e -and -not $e.allowed) "informe.docx bloqueado en CtrlE2E ($($e.reason))"
 $e = Entry 'CtrlE2E' 'planilla.xlsx'; Check ($e -and -not $e.allowed -and $e.reason -like 'Global*') "planilla.xlsx bloqueado por Global en CtrlE2E ($($e.reason))"
