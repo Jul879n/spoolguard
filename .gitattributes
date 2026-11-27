@@ -1,0 +1,2 @@
+# Fixtures firmadas con minisign: sin conversión de saltos de línea (la firma cubre los bytes exactos)
+core/tests/fixtures/** -text
