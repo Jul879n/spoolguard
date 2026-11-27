@@ -583,7 +583,7 @@ dependencies = [
 
 [[package]]
 name = "control-impresion"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
  "control-core",
@@ -5360,7 +5360,7 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "winguard"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "winnow"
