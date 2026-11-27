@@ -110,7 +110,14 @@ $cfg = '{"printers":{"CtrlE2E":{"enabled":true,"mode":"block","apps":["*.docx"],
 [IO.File]::WriteAllText((Join-Path $Data 'config.json'), $cfg)
 $env:CONTROL_IMPRESION_DIR = $Data
 $app = Start-Process $exe.FullName -ArgumentList '--minimized' -PassThru -RedirectStandardOutput (Join-Path $Out 'app-stdout.txt') -RedirectStandardError (Join-Path $Out 'app-stderr.txt')
-Start-Sleep 12
+# El guardián se lanza al final del arranque (tras reaplicar la retención): medido ~9,5 s en la VM, más en un runner cargado.
+# Se espera hasta 60 s en vez de un plazo fijo, y se informa la latencia real.
+$t0 = Get-Date
+while (((Get-Date) - $t0).TotalSeconds -lt 60) {
+  if ((Test-Path (Join-Path $Data 'app.pid')) -and (Get-CimInstance Win32_Process -Filter "Name='control-impresion.exe'" | Where-Object CommandLine -like '*--guardian*')) { break }
+  Start-Sleep -Milliseconds 500
+}
+Write-Host ("Arranque completo (app.pid + guardian) tras {0:N1} s" -f ((Get-Date) - $t0).TotalSeconds)
 Shot 'desktop-1-arranque'
 $alive = -not (Get-Process -Id $app.Id -ErrorAction SilentlyContinue).HasExited -and (Get-Process -Id $app.Id -ErrorAction SilentlyContinue)
 Check ([bool]$alive) "la app sigue viva tras 12 s (pid $($app.Id))"

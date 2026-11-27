@@ -44,6 +44,8 @@ Corregidos: purga de 24 h que borraba las marcas `controlled-*`, retención por 
 - `docker/entrypoint.sh`: el reintento de `lpadmin` suma ~10 s por impresora inválida y oculta el error.
 - `docker/Dockerfile`: borra bibliotecas compartidas sin validar con `ldd` los binarios de CUPS.
 
+- Arranque lento en Windows: la app tarda ~9,5 s en dejar el guardián y `app.pid` (medido en la VM; la cola se retiene a los ~5 s) y en el runner de CI superó los 12 s fijos del e2e de `a7bfed8`. Queda por perfilar qué parte del `setup` (retención de colas antes de `spawn_guardian`) lo demora; el e2e ahora espera hasta 60 s e informa la latencia.
+
 ## Paridad
 
 La regla por IP de Windows resuelve el nombre del equipo de origen a IP (límite de 1 s, con caché); falta probarla con un cliente remoto real.
