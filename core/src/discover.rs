@@ -495,7 +495,7 @@ mod tests {
     fn escanea_listeners_falsos_en_loopback() {
         let raw = TcpListener::bind("127.0.0.1:0").unwrap();
         let ipp = TcpListener::bind("127.0.0.1:0").unwrap();
-        let free = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port(); // se cierra: puerto cerrado
+        let free = 1; // puerto reservado (tcpmux) cerrado en loopback; un puerto efímero liberado podía ser reutilizado por otra prueba en paralelo
         let ports = Ports { raw: raw.local_addr().unwrap().port(), lpd: free, ipp: ipp.local_addr().unwrap().port() };
         let hosts = parse_cidrs(&s(&["127.0.0.1"]), false).unwrap();
         let tr = |_: &str, _: u16, _: &[u8]| -> Result<Vec<u8>, String> {
