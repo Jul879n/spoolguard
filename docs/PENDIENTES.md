@@ -14,7 +14,7 @@ Estado al 2026-11-27. Lo hecho y verificado está en [PLAN.md](PLAN.md) y [prote
 | Impresión directa por IPP con hardware | Una impresora de red real | Detección simulada (macOS, Linux, Windows) |
 | Impresoras físicas (todas las plataformas) | Probar con USB, Ethernet y WiFi reales | Colas virtuales y listeners de prueba |
 | Linux con sesión gráfica real | Un equipo Linux con escritorio | App `release` bajo Xvfb con CUPS real: 0 de 5 `.docx` impresos, 5 de 5 `.xlsx` |
-| Instaladores reales (.msi, .dmg, .deb, .rpm) | Instalar en equipos limpios y revisar el arranque con el sistema | Compilación de la app; MSI generado en la VM |
+| Instaladores reales (.msi, .dmg, .deb, .rpm) | Instalar en equipos limpios y revisar el arranque con el sistema | Compilación de la app; MSI publicado de v0.3.0 (SHA-256 igual al del release) instalado, retiene la cola, deja guardián y se desinstala sin errores en la VM Win10; MSI generado en la VM |
 | macOS estricto: repetir la medición de la fuga a los ~10 s | Nada | **Medido 2026-11-27**, cola `SGMacTest` (backend de prueba por socket), app cerrada, `timeout=5`, `strict=1`, 3 rondas: a los 30 s sin veredicto 0 impresos en las 3; tras `allow` 1 (rondas 1 y 3); tras `deny` 0 (ronda 2); 0 pendientes. Sin fuga |
 
 Script de la prueba de macOS: `~/Library/Application Support/spoolguard-prueba/estricto.sh` (ejecutado el 2026-11-27; elimina la cola temporal al terminar).
@@ -44,7 +44,7 @@ Corregidos: purga de 24 h que borraba las marcas `controlled-*`, retención por 
 - `docker/entrypoint.sh`: el reintento de `lpadmin` suma ~10 s por impresora inválida y oculta el error.
 - `docker/Dockerfile`: borra bibliotecas compartidas sin validar con `ldd` los binarios de CUPS.
 
-- Arranque lento en Windows: la app tarda ~9,5 s en dejar el guardián y `app.pid` (medido en la VM; la cola se retiene a los ~5 s) y en el runner de CI superó los 12 s fijos del e2e de `a7bfed8`. Queda por perfilar qué parte del `setup` (retención de colas antes de `spawn_guardian`) lo demora; el e2e ahora espera hasta 60 s e informa la latencia.
+- Arranque lento en Windows: la app tarda ~9,5 s en dejar el guardián y `app.pid` (medido en la VM; la cola se retiene a los ~5 s) y en el runner de CI superó los 12 s fijos del e2e de `a7bfed8`. Con una sola cola controlada el MSI publicado de v0.3.0 dejó guardián y `app.pid` a los 1,8 s (2026-11-27): la latencia crece con el número de colas retenidas (con regla global sobre todas las colas de la VM fueron ~9,5 s). Queda por perfilar qué parte del `setup` (retención de colas antes de `spawn_guardian`) lo demora; el e2e ahora espera hasta 60 s e informa la latencia.
 
 ## Paridad
 
