@@ -598,6 +598,24 @@ func activityEvent(a Activity, host string) Event {
 	return e
 }
 
+// retentionEnvSet indica si CONTROL_LOG_RETENTION_DAYS tiene un valor válido: en ese caso (control del administrador del
+// contenedor) manda sobre el ajuste «Retención del registro» de la app.
+func retentionEnvSet() bool {
+	v := strings.TrimSpace(os.Getenv("CONTROL_LOG_RETENTION_DAYS"))
+	n, err := strconv.ParseInt(v, 10, 64)
+	return v != "" && err == nil && n >= 0 && n <= 36500
+}
+
+// effectiveRetention: días de retención de eventos. La variable de entorno, si es válida; si no, el ajuste de la app (1-3650).
+func (s *Server) effectiveRetention() int64 {
+	if s.retentionEnv {
+		return s.retention
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return int64(s.cfg.Settings.RetentionDays)
+}
+
 // retentionDays lee CONTROL_LOG_RETENTION_DAYS: por defecto 365; 0 = sin límite; inválido = 365.
 func retentionDays() int64 {
 	v := strings.TrimSpace(os.Getenv("CONTROL_LOG_RETENTION_DAYS"))
@@ -784,7 +802,7 @@ func (s *Server) clearLog(_ *http.Request, _ json.RawMessage) (any, error) {
 
 // purgeEvents aplica la retención al arrancar y cada hora.
 func (s *Server) purgeEvents() {
-	if n, err := s.events.purge(s.retention); err != nil {
+	if n, err := s.events.purge(s.effectiveRetention()); err != nil {
 		fmt.Fprintln(os.Stderr, "control-server: limpieza del registro:", err)
 	} else if n > 0 {
 		fmt.Fprintf(os.Stderr, "control-server: retención: %d eventos antiguos eliminados\n", n)

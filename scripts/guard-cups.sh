@@ -5,6 +5,9 @@
 #                   guard-cups.sh status [cola ...]    (imprime «protegidas total»)
 # Cada trabajo espera, dentro de CUPS y antes de enviar datos a la impresora, el veredicto de la app
 # (carpeta de veredictos). Sin veredicto en 10 s se imprime: la app cerrada no debe parar la impresión.
+# Configurable desde Ajustes de la app (archivo «config» de la carpeta de veredictos: timeout=<1-600 s>, strict=<0|1>;
+# inválido o ausente = 10 s y falla abierta). Con strict=1 el filtro NO vence por tiempo: espera el veredicto sin límite (CUPS no puede retener un trabajo desde un filtro,
+# y salir con error lo aborta y lo pierde); la cola queda ocupada por ese trabajo hasta que la app responda o se cancele.
 # Variable SG_OWNER: usuario que ejecuta la app (escribe los veredictos); por defecto SUDO_USER.
 set -eu
 cmd="${1:-}"; [ $# -gt 0 ] && shift
@@ -35,8 +38,18 @@ mkwrapper() { # $1 = nombre del filtro original
 # SpoolGuard: espera el veredicto de la app antes de pasar el trabajo al filtro original.
 J="\$1"
 V="$DATA/verdicts/\${PRINTER}-\${J}"
+T=10; S=0
+C="$DATA/verdicts/config"
+if [ -f "\$C" ]; then
+  t=\$(sed -n 's/^timeout=\\([0-9]\\{1,3\\}\\)\$/\\1/p' "\$C" 2>/dev/null | head -n 1)
+  s=\$(sed -n 's/^strict=\\([01]\\)\$/\\1/p' "\$C" 2>/dev/null | head -n 1)
+  if [ -n "\$t" ] && [ "\$t" -ge 1 ] && [ "\$t" -le 600 ]; then T="\$t"; fi
+  [ "\$s" = 1 ] && S=1
+fi
+# Solo las colas con control (marca que escribe la app) esperan el veredicto; las demás pasan sin espera.
+[ -f "$DATA/verdicts/controlled-\${PRINTER}" ] || exec "$FILTERS/$1" "\$@"
 v=""; i=0
-while [ \$i -lt 100 ]; do
+while [ "\$S" = 1 ] || [ \$i -lt \$((T * 10)) ]; do
   if [ -f "\$V" ]; then v=\$(cat "\$V" 2>/dev/null); break; fi
   sleep 0.1; i=\$((i+1))
 done
@@ -70,7 +83,11 @@ install)
   for q in $queues; do
     ppd="/etc/cups/ppd/$q.ppd"
     [ -r "$ppd" ] || { echo "· $q: sin PPD (cola sin filtros), se omite"; continue; }
-    if protected "$q"; then echo "· $q: ya protegida"; continue; fi
+    if protected "$q"; then
+      # Ya protegida: se regenera el envoltorio (así «Reparar» actualiza un filtro instalado por una versión anterior).
+      for prog in $(grep -o "$PFX[A-Za-z0-9_.-]*" "$ppd" | sed "s/^$PFX//" | sort -u); do [ -x "$FILTERS/$prog" ] && mkwrapper "$prog"; done
+      echo "· $q: ya protegida (filtro actualizado)"; continue
+    fi
     tmp="$(mktemp /tmp/sg-ppd.XXXXXX)"; chmod 644 "$tmp"
     changed=0
     while IFS= read -r line; do

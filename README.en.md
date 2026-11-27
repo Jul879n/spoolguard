@@ -19,12 +19,12 @@ Screenshots use sample data. The app interface is in Spanish.
 
 - Rules by application, website and computer (IP or name): block matches or allow only matches.
 - Global rule plus per-printer rules; blocking always wins. Rules can be suspended temporarily.
-- Pre-print protection: a CUPS filter makes apps such as Word wait for the verdict before paper comes out ([guide, Spanish](docs/proteccion-previa.md)).
+- Pre-print protection: a CUPS filter (macOS/Linux) or a spooler print processor (Windows) makes apps such as Word wait for the verdict before paper comes out ([guide, Spanish](docs/proteccion-previa.md)).
 - Browser extension for per-site rules, print log, printer inventory and network discovery.
 
 ## Install
 
-Download your file from the [latest release](https://github.com/Jul879n/spoolguard/releases/latest): `.dmg` (macOS, Apple Silicon or Intel), `.msi` (Windows), `.deb` / `.rpm` (Linux), and the extension `.zip`. Installers are **unsigned**: macOS Gatekeeper and Windows SmartScreen warn on first run. Steps: [docs/instalacion.md](docs/instalacion.md).
+Download your file from the [latest release](https://github.com/Jul879n/spoolguard/releases/latest): `.dmg` (macOS, Apple Silicon or Intel), `.msi` (Windows), `.deb` / `.rpm` (Linux), and the extension `.zip`. Installers carry no Windows code-signing certificate and are not Apple-notarized: macOS Gatekeeper and Windows SmartScreen warn on first run. Steps: [docs/instalacion.md](docs/instalacion.md). The app shows its version and checks for updates from Settings; new releases ship minisign signatures and build provenance ([verification guide](docs/firma-releases.md), in Spanish).
 
 ## Quick start
 

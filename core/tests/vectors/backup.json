@@ -63,30 +63,30 @@
     },
     {
       "kind": "import", "name": "parámetros combinar: solo cambian los presentes",
-      "current": {"params": {"unknown_policy": "block", "interval_secs": 5, "notify_block": false, "notify_allow": true, "theme": "light", "retention_days": 30}},
+      "current": {"params": {"unknown_policy": "block", "interval_secs": 5, "notify_block": false, "notify_allow": true, "theme": "light", "retention_days": 30, "verdict_timeout_secs": 10, "strict": false}},
       "local": [],
       "file": {"format": "spoolguard-backup", "version": 1, "parametros": {"theme": "dark"}},
       "modo": "combinar",
       "expect": {
         "ok": true,
-        "next": {"params": {"unknown_policy": "block", "interval_secs": 5, "notify_block": false, "notify_allow": true, "theme": "dark", "retention_days": 30}},
+        "next": {"params": {"unknown_policy": "block", "interval_secs": 5, "notify_block": false, "notify_allow": true, "theme": "dark", "retention_days": 30, "verdict_timeout_secs": 10, "strict": false}},
         "preview": {"parametros.cambios": [{"campo": "theme", "de": "light", "a": "dark"}]}
       }
     },
     {
       "kind": "import", "name": "parámetros reemplazar: lo ausente vuelve al valor por defecto",
-      "current": {"params": {"unknown_policy": "block", "interval_secs": 5, "notify_block": false, "notify_allow": true, "theme": "light", "retention_days": 30}},
+      "current": {"params": {"unknown_policy": "block", "interval_secs": 5, "notify_block": false, "notify_allow": true, "theme": "light", "retention_days": 30, "verdict_timeout_secs": 10, "strict": false}},
       "local": [],
       "file": {"format": "spoolguard-backup", "version": 1, "parametros": {"theme": "dark"}},
       "modo": "reemplazar",
       "expect": {
         "ok": true,
-        "next": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 90}}
+        "next": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 90, "verdict_timeout_secs": 10, "strict": false}}
       }
     },
     {
       "kind": "import", "name": "intento de colar contraseña, tokens y claves peligrosas en parámetros",
-      "current": {"params": {"unknown_policy": "allow", "interval_secs": 2, "notify_block": true, "notify_allow": false, "theme": "light", "retention_days": 90}},
+      "current": {"params": {"unknown_policy": "allow", "interval_secs": 2, "notify_block": true, "notify_allow": false, "theme": "light", "retention_days": 90, "verdict_timeout_secs": 10, "strict": false}},
       "local": [],
       "file": {"format": "spoolguard-backup", "version": 1,
         "password_hash": "aaaa", "token": "sgm_robado", "session": "xyz",
@@ -94,7 +94,7 @@
       "modo": "reemplazar",
       "expect": {
         "ok": true,
-        "next": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 90}},
+        "next": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 90, "verdict_timeout_secs": 10, "strict": false}},
         "preview": {"errores": []},
         "warnings_contain": ["campo sensible ignorado por seguridad: password_hash", "campo sensible ignorado por seguridad: password_salt", "campo sensible ignorado por seguridad: server_token", "campo sensible ignorado por seguridad: ext_token", "campo sensible ignorado por seguridad: token", "campo sensible ignorado por seguridad: session", "clave peligrosa ignorada: __proto__", "clave peligrosa ignorada: constructor", "campo desconocido ignorado: send_events", "campo desconocido ignorado: server_url"]
       }
@@ -127,7 +127,7 @@
     },
     {
       "kind": "import", "name": "formato antiguo de reglas (config.json): reglas y ajustes permitidos, sin tokens ni contraseña",
-      "current": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "system", "retention_days": 90}},
+      "current": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "system", "retention_days": 90, "verdict_timeout_secs": 10, "strict": false}},
       "local": ["Oficina"],
       "file": {"printers": {"Oficina": {"enabled": true, "mode": "allow", "apps": ["*.pdf"], "sites": ["a.cl"], "ips": ["10.1.1.0/24"]}, "Vieja": {"enabled": false, "mode": null, "apps": [], "sites": [], "ips": []}},
                "global": {"enabled": true, "mode": "block", "apps": [], "sites": [], "ips": ["1.2.3.4"]},
@@ -139,7 +139,7 @@
             "Oficina": {"enabled": true, "mode": "allow", "apps": ["*.pdf"], "sites": ["a.cl"], "ips": ["10.1.1.0/24"]},
             "Vieja": {"enabled": false, "mode": null, "apps": [], "sites": [], "ips": []}},
           "global": {"enabled": true, "mode": "block", "apps": [], "sites": [], "ips": ["1.2.3.4"]},
-          "params": {"unknown_policy": "block", "interval_secs": 3, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 10}},
+          "params": {"unknown_policy": "block", "interval_secs": 3, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 10, "verdict_timeout_secs": 10, "strict": false}},
         "preview": {"legacy": true, "reglas.nuevas": 2},
         "warnings_contain": ["Formato antiguo de reglas", "settings: campo sensible ignorado por seguridad: password_hash", "settings: campo sensible ignorado por seguridad: server_token"]
       }
@@ -152,7 +152,7 @@
       "modo": {"reglas": "omitir", "parametros": "combinar"},
       "expect": {
         "ok": true, "applied": ["parametros"],
-        "next": {"printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": []}}, "params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 90}},
+        "next": {"printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": []}}, "params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 90, "verdict_timeout_secs": 10, "strict": false}},
         "preview": {"reglas": null, "registro": null}
       }
     },
@@ -236,7 +236,7 @@
       "state": {
         "printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word", "*.pdf"], "sites": ["facebook.com"], "ips": ["192.168.1.0/24"]}, "Taller": {"enabled": false, "mode": "allow", "apps": [], "sites": [], "ips": []}},
         "global": {"enabled": true, "mode": "block", "apps": [], "sites": ["tiktok.com"], "ips": ["10.0.0.5"]},
-        "params": {"unknown_policy": "block", "interval_secs": 2, "notify_block": true, "notify_allow": true, "theme": "dark", "retention_days": 30}},
+        "params": {"unknown_policy": "block", "interval_secs": 2, "notify_block": true, "notify_allow": true, "theme": "dark", "retention_days": 30, "verdict_timeout_secs": 10, "strict": false}},
       "categories": ["registro", "parametros", "reglas", "inventario"],
       "events": [{"id": "bbbbbbbb-0001", "ts": 1700000000, "host": "pc", "ip": "", "user": "ana", "printer": "Oficina", "port": "", "conn_type": "", "document": "a.docx", "site": "", "app": "Word", "pages": 2, "bytes": null, "decision": "block", "reason": "Aplicación: Word", "status": "cancelado", "source": "desktop"}],
       "inventory": [{"name": "Oficina", "kind": "red", "uri": "ipp://admin:clave@10.0.0.5/ipp/print?token=1"}],
@@ -246,7 +246,7 @@
         "reglas": {
           "global": {"enabled": true, "mode": "block", "apps": [], "sites": ["tiktok.com"], "ips": ["10.0.0.5"]},
           "printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word", "*.pdf"], "sites": ["facebook.com"], "ips": ["192.168.1.0/24"]}, "Taller": {"enabled": false, "mode": "allow", "apps": [], "sites": [], "ips": []}}},
-        "parametros": {"unknown_policy": "block", "interval_secs": 2, "notify_block": true, "notify_allow": true, "theme": "dark", "retention_days": 30},
+        "parametros": {"unknown_policy": "block", "interval_secs": 2, "notify_block": true, "notify_allow": true, "theme": "dark", "retention_days": 30, "verdict_timeout_secs": 10, "strict": false},
         "registro": [{"id": "bbbbbbbb-0001", "ts": 1700000000, "host": "pc", "ip": "", "user": "ana", "printer": "Oficina", "port": "", "conn_type": "", "document": "a.docx", "site": "", "app": "Word", "pages": 2, "bytes": null, "decision": "block", "reason": "Aplicación: Word", "status": "cancelado", "source": "desktop"}],
         "inventario": [{"name": "Oficina", "kind": "red", "uri": "ipp://10.0.0.5/ipp/print"}]},
       "server": false
@@ -266,6 +266,67 @@
                    "printers": {"Oficina": {"enabled": true, "mode": "block", "apps": ["Word"], "sites": [], "ips": []}}},
         "bloqueo_rapido": {"blocks": [{"host": "pc9", "ips": ["10.0.0.9"], "by": "admin@10.0.0.1", "time": 1700000100}], "paused_printers": {"Oficina": {"by": "admin@10.0.0.1", "time": 1700000200}}}},
       "server": true
+    },
+    {
+      "kind": "import", "name": "protección previa: espera del veredicto y modo estricto válidos (3, 120 y 600 s; límites incluidos)",
+      "current": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "system", "retention_days": 90, "verdict_timeout_secs": 10, "strict": false}},
+      "local": [],
+      "file": {"format": "spoolguard-backup", "version": 1, "parametros": {"verdict_timeout_secs": 120, "strict": true}},
+      "modo": "combinar",
+      "expect": {
+        "ok": true,
+        "next": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "system", "retention_days": 90, "verdict_timeout_secs": 120, "strict": true}},
+        "preview": {"parametros.cambios": [{"campo": "strict", "de": false, "a": true}, {"campo": "verdict_timeout_secs", "de": 10, "a": 120}]}
+      }
+    },
+    {
+      "kind": "import", "name": "protección previa: límites 1 y 600 se aceptan",
+      "current": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "system", "retention_days": 90, "verdict_timeout_secs": 10, "strict": false}},
+      "local": [],
+      "file": {"format": "spoolguard-backup", "version": 1, "parametros": {"verdict_timeout_secs": 600}},
+      "modo": "combinar",
+      "expect": {
+        "ok": true,
+        "next": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "system", "retention_days": 90, "verdict_timeout_secs": 600, "strict": false}}
+      }
+    },
+    {
+      "kind": "import", "name": "protección previa: reemplazar sin los campos vuelve a 10 s y falla abierta",
+      "current": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "system", "retention_days": 90, "verdict_timeout_secs": 300, "strict": true}},
+      "local": [],
+      "file": {"format": "spoolguard-backup", "version": 1, "parametros": {"theme": "dark"}},
+      "modo": "reemplazar",
+      "expect": {
+        "ok": true,
+        "next": {"params": {"unknown_policy": "allow", "interval_secs": 1, "notify_block": true, "notify_allow": false, "theme": "dark", "retention_days": 90, "verdict_timeout_secs": 10, "strict": false}}
+      }
+    },
+    {
+      "kind": "import", "name": "protección previa: valores inválidos se rechazan (0, 601, texto, decimal, estricto no booleano)",
+      "current": {},
+      "local": [],
+      "file": {"format": "spoolguard-backup", "version": 1, "parametros": {"verdict_timeout_secs": 601, "strict": "si"}},
+      "modo": "combinar",
+      "expect": {
+        "ok": false,
+        "errors_contain": ["parametros.verdict_timeout_secs: debe ser un entero entre 1 y 600", "parametros.strict: debe ser verdadero o falso"]
+      }
+    },
+    {
+      "kind": "import", "name": "protección previa: espera cero o en texto se rechaza",
+      "current": {},
+      "local": [],
+      "file": {"format": "spoolguard-backup", "version": 1, "parametros": {"verdict_timeout_secs": 0}},
+      "modo": "combinar",
+      "expect": {"ok": false, "errors_contain": ["parametros.verdict_timeout_secs: debe ser un entero entre 1 y 600"]}
+    },
+    {
+      "kind": "import", "name": "protección previa: espera en texto o decimal se rechaza",
+      "current": {},
+      "local": [],
+      "file": {"format": "spoolguard-backup", "version": 1, "parametros": {"verdict_timeout_secs": "10"}},
+      "modo": "combinar",
+      "expect": {"ok": false, "errors_contain": ["parametros.verdict_timeout_secs: debe ser un entero entre 1 y 600"]}
     }
   ]
 }

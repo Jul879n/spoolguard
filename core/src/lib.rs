@@ -1,11 +1,13 @@
 pub mod backup;
 pub mod cups;
+pub mod direct;
 pub mod discover;
 pub mod events;
 pub mod extension;
 pub mod intents;
 pub mod inventory;
 pub mod rules;
+pub mod update;
 #[cfg(windows)]
 pub mod spooler;
 

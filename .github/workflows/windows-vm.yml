@@ -13,6 +13,8 @@ jobs:
       - name: Pruebas del núcleo
         continue-on-error: true  # spooler_windows falla en Windows 10 (StartDocPrinter RAW con Print to PDF)
         run: cargo test -p control-core
+      - name: Print processor (winguard)
+        run: cargo test -p winguard
       - name: Instalador MSI
         run: npx tauri build --bundles msi
       - uses: actions/upload-artifact@v4

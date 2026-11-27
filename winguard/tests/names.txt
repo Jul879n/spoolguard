@@ -1,0 +1,7 @@
+# cola	id	nombre de archivo esperado (la app y la DLL deben coincidir)
+CtrlTest	12	CtrlTest-12
+Mi Impresora (3)	7	Mi Impresora (3)-7
+\\srv\cola	5	__srv_cola-5
+Oficina/2:x	1	Oficina_2_x-1
+ñandú	9	ñandú-9
+	3	_-3

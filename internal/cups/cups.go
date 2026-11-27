@@ -111,7 +111,26 @@ func SetHold(workDir, printer string, hold bool) error {
 	}
 	// Mejor esfuerzo: si falla, la retención por defecto sigue vigente (solo no cubre no-hold).
 	_ = HoldNewJobs(workDir, printer, hold)
+	MarkControlled(printer, hold)
 	return nil
+}
+
+// controlledMark es el archivo que indica al backend/filtro que la cola tiene control: solo en esas colas esperan el
+// veredicto (en modo estricto, sin límite). Una cola protegida pero sin control deja pasar los trabajos sin esperar.
+func controlledMark(dir, printer string) string { return filepath.Join(dir, "controlled-"+printer) }
+
+// MarkControlled crea o borra la marca de cola controlada. Sin la carpeta de veredictos (protección no instalada) no hace nada.
+func MarkControlled(printer string, on bool) {
+	dir := VerdictsDir()
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() || !ValidQueue(printer) {
+		return
+	}
+	m := controlledMark(dir, printer)
+	if on {
+		_ = os.WriteFile(m, nil, 0o644)
+	} else {
+		_ = os.Remove(m)
+	}
 }
 
 // cupsSocket devuelve el socket local de cupsd si existe (la operación exige @SYSTEM por TCP, no por el socket local).
@@ -313,9 +332,39 @@ func WriteVerdict(printer string, id uint32, allowed bool) {
 	}
 	if ents, err := os.ReadDir(dir); err == nil { // veredictos de más de un día
 		for _, e := range ents {
+			if e.Name() == "config" || strings.HasPrefix(e.Name(), "controlled-") {
+				continue
+			}
 			if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > 24*time.Hour {
 				_ = os.Remove(filepath.Join(dir, e.Name()))
 			}
+		}
+	}
+}
+
+// ConfigLine es el contenido del archivo `config` de la carpeta de veredictos que lee el backend/filtro:
+// `timeout=<1-600>` y `strict=<0|1>`. Un valor fuera de rango se normaliza a los valores seguros (10 s, abierto).
+func ConfigLine(timeout uint64, strict bool) string {
+	if timeout < 1 || timeout > 600 {
+		timeout = 10
+	}
+	s := 0
+	if strict {
+		s = 1
+	}
+	return fmt.Sprintf("timeout=%d\nstrict=%d\n", timeout, s)
+}
+
+// WriteConfig deja la espera y el modo estricto para el backend (escritura atómica). Sin la carpeta no hace nada.
+func WriteConfig(timeout uint64, strict bool) {
+	dir := VerdictsDir()
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return
+	}
+	tmp := filepath.Join(dir, ".config.tmp")
+	if os.WriteFile(tmp, []byte(ConfigLine(timeout, strict)), 0o644) == nil {
+		if os.Rename(tmp, filepath.Join(dir, "config")) != nil {
+			_ = os.Remove(tmp)
 		}
 	}
 }

@@ -1,6 +1,10 @@
 package cups
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestValidQueue(t *testing.T) {
 	ok := []string{"Oficina", "HP_LaserJet-400", "Taller.2", "impresora_ñ"}
@@ -33,4 +37,24 @@ func TestMutadoresRechazanNombresMaliciosos(t *testing.T) {
 			t.Errorf("Info/DeviceURI aceptaron %q", n)
 		}
 	}
+}
+
+func TestMarcaDeColaControlada(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CONTROL_VERDICTS_DIR", dir)
+	m := filepath.Join(dir, "controlled-Q1")
+	MarkControlled("Q1", true)
+	if _, err := os.Stat(m); err != nil {
+		t.Fatalf("debía crear la marca: %v", err)
+	}
+	MarkControlled("Q1", false)
+	if _, err := os.Stat(m); err == nil {
+		t.Fatal("debía borrar la marca")
+	}
+	MarkControlled("../x", true) // nombre inválido: no escribe fuera de la carpeta
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "controlled-../x")); err == nil {
+		t.Fatal("no debe aceptar nombres inválidos")
+	}
+	t.Setenv("CONTROL_VERDICTS_DIR", filepath.Join(dir, "no-existe"))
+	MarkControlled("Q1", true) // sin carpeta de veredictos no hace nada ni falla
 }

@@ -1,12 +1,13 @@
-//! Prueba de integración real con CUPS en Linux (cola file:///dev/null).
+//! Prueba de integración real con CUPS en Linux y macOS (cola file:///dev/null, o la de CUPS_E2E_URI:
+//! en macOS el backend file:// está restringido: usa p. ej. socket://127.0.0.1:19100 con un listener).
 //! Solo corre con `CUPS_E2E=1` (la CI la lanza con privilegios para `lpadmin`);
 //! sin esa variable se omite para no romper `cargo test` en equipos sin CUPS.
-#![cfg(target_os = "linux")]
+#![cfg(unix)]
 
 use control_core::cups;
 use control_core::rules::{Decision, Mode, PrinterRules};
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Command,
     thread::sleep,
     time::{Duration, Instant},
@@ -44,11 +45,12 @@ impl Drop for Queue {
 }
 
 fn create_queue() -> Queue {
+    let uri = std::env::var("CUPS_E2E_URI").unwrap_or_else(|_| "file:///dev/null".into());
     let _ = Command::new("lpadmin").args(["-x", Q]).output(); // restos de una corrida previa
     // Se prueban los modelos en orden: el genérico de CUPS (sample.drv) y luego raw.
     let mut errs = vec![];
     for model in ["drv:///sample.drv/generic.ppd", "raw"] {
-        match sh("lpadmin", &["-p", Q, "-E", "-v", "file:///dev/null", "-m", model]) {
+        match sh("lpadmin", &["-p", Q, "-E", "-v", &uri, "-m", model]) {
             Ok(_) => return Queue,
             Err(e) => errs.push(e),
         }
@@ -56,7 +58,7 @@ fn create_queue() -> Queue {
     panic!("no se pudo crear la cola: {errs:?}");
 }
 
-fn submit(title: &str, file: &PathBuf) -> u32 {
+fn submit(title: &str, file: &Path) -> u32 {
     let out = sh("lp", &["-d", Q, "-t", title, file.to_str().unwrap()]).expect("lp");
     // "request id is CtrlTest-7 (1 file(s))"
     out.split_whitespace()

@@ -31,7 +31,8 @@ func (s *Server) snapshot() Snapshot {
 	}
 	st := c.Settings
 	snap.Params = Params{UnknownPolicy: st.UnknownPolicy, IntervalSecs: st.IntervalSecs, NotifyBlock: st.NotifyBlock,
-		NotifyAllow: st.NotifyAllow, Theme: st.Theme, RetentionDays: st.RetentionDays}
+		NotifyAllow: st.NotifyAllow, Theme: st.Theme, RetentionDays: st.RetentionDays,
+		VerdictTimeoutSecs: st.VerdictTimeoutSecs, Strict: st.Strict}
 	return snap.clone()
 }
 
@@ -195,6 +196,7 @@ func (s *Server) applyBackup(a importArgs, actor string) (any, error) {
 		st := &s.cfg.Settings // solo la lista blanca: contraseña y demás no se tocan
 		st.UnknownPolicy, st.IntervalSecs, st.NotifyBlock = next.Params.UnknownPolicy, next.Params.IntervalSecs, next.Params.NotifyBlock
 		st.NotifyAllow, st.Theme, st.RetentionDays = next.Params.NotifyAllow, next.Params.Theme, next.Params.RetentionDays
+		st.VerdictTimeoutSecs, st.Strict = next.Params.VerdictTimeoutSecs, next.Params.Strict
 		if err := s.saveLocked(); err != nil {
 			rollback()
 			s.mu.Unlock()

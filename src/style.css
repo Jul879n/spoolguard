@@ -34,8 +34,8 @@ input,select{font:inherit;padding:6px 10px;border:1px solid var(--line);border-r
 table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line)}
 th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px}th{color:var(--mut);font-weight:600}
 .bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
-.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}.cols .card{margin:0}
-.field{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}.field:last-child{border:0}
+.cols{display:block;columns:300px;column-gap:12px}.cols .card{margin:0 0 12px;break-inside:avoid;min-width:0}
+.field{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 10px;padding:8px 0;border-bottom:1px solid var(--line);min-width:0}.field:last-child{border:0}
 .err{color:var(--bdt);font-size:12px;min-height:1em}
 #lock{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:10}
 .lockbox{display:flex;flex-direction:column;gap:10px;width:300px}
@@ -90,7 +90,7 @@ dialog.wide{width:600px;max-width:92vw;max-height:90vh;overflow:auto}
 .tw{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin-bottom:12px;background:var(--card)}
 .tw table{border:0;min-width:640px}.tw tr:last-child td{border-bottom:0}
 .tw td:first-child{white-space:normal}
-.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;word-break:break-all}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;overflow-wrap:anywhere}
 .num{text-align:right}
 .tabs{margin-bottom:12px}
 .chk-line{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--mut)}
@@ -116,3 +116,16 @@ nav a{display:flex;align-items:center;gap:10px}nav a .ic{width:17px;height:17px;
 .dots{display:flex;gap:6px}.dots i{width:22px;height:4px;border-radius:2px;background:var(--line)}.dots i.past{background:var(--pri);opacity:.45}.dots i.on{background:var(--pri)}
 dialog.setup{width:520px}
 .chip.paused{opacity:.6;border-style:dashed}.chip.paused>small{margin-left:4px}
+
+/* Ajustes: nada se recorta ni desborda su tarjeta (selectores, rutas, insignias largas, campos con ancho fijo) */
+.field .seg{flex:none;max-width:100%}.seg button{white-space:nowrap}
+.field input{max-width:100%;min-width:0}
+.field .sub,.cols .card .sub{min-width:0;overflow-wrap:anywhere}
+.field .badge{white-space:normal;max-width:100%}
+.tw td.mono{min-width:180px}.tw td.nw{white-space:nowrap}.grid{align-items:start}
+
+/* Versión y actualización */
+#s-ver .field{border:0;padding-bottom:0}
+.upd{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding-top:4px}.upd:empty{display:none}
+.upd .row{width:100%;gap:10px}.upd-notes{white-space:pre-line}
+nav .ver{margin-top:2px;font-size:11px;opacity:.7}

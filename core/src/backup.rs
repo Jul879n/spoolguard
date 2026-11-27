@@ -32,11 +32,15 @@ pub struct Params {
     pub notify_allow: bool,
     pub theme: String,
     pub retention_days: u64,
+    /// Protección previa: segundos que el procesador/filtro espera el veredicto (1–600, por defecto 10).
+    pub verdict_timeout_secs: u64,
+    /// Protección previa estricta: sin veredicto a tiempo el trabajo no se imprime (por defecto apagado = falla abierta).
+    pub strict: bool,
 }
 
 impl Default for Params {
     fn default() -> Self {
-        Params { unknown_policy: "allow".into(), interval_secs: 1, notify_block: true, notify_allow: false, theme: "system".into(), retention_days: 90 }
+        Params { unknown_policy: "allow".into(), interval_secs: 1, notify_block: true, notify_allow: false, theme: "system".into(), retention_days: 90, verdict_timeout_secs: 10, strict: false }
     }
 }
 
@@ -48,6 +52,8 @@ struct PartialParams {
     notify_allow: Option<bool>,
     theme: Option<String>,
     retention_days: Option<u64>,
+    verdict_timeout_secs: Option<u64>,
+    strict: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -370,7 +376,7 @@ fn rules_from(v: &Value, path: &str, n: &mut Notes) -> Option<PrinterRules> {
 }
 
 fn params_from(m: &Map<String, Value>, n: &mut Notes) -> PartialParams {
-    n.unknown("parametros", m, &["unknown_policy", "interval_secs", "notify_block", "notify_allow", "theme", "retention_days"]);
+    n.unknown("parametros", m, &["unknown_policy", "interval_secs", "notify_block", "notify_allow", "theme", "retention_days", "verdict_timeout_secs", "strict"]);
     let mut p = PartialParams::default();
     let get = |k: &str| m.get(k).filter(|v| !v.is_null());
     if let Some(v) = get("unknown_policy") {
@@ -385,19 +391,21 @@ fn params_from(m: &Map<String, Value>, n: &mut Notes) -> PartialParams {
             _ => n.err("parametros.theme: debe ser «light», «dark» o «system»".into()),
         }
     }
-    for (k, lo, hi) in [("interval_secs", 1u64, 60u64), ("retention_days", 1, 3650)] {
+    for (k, lo, hi) in [("interval_secs", 1u64, 60u64), ("retention_days", 1, 3650), ("verdict_timeout_secs", 1, 600)] {
         if let Some(v) = get(k) {
             match v.as_u64().filter(|x| (lo..=hi).contains(x)) {
                 Some(x) if k == "interval_secs" => p.interval_secs = Some(x),
+                Some(x) if k == "verdict_timeout_secs" => p.verdict_timeout_secs = Some(x),
                 Some(x) => p.retention_days = Some(x),
                 None => n.err(format!("parametros.{k}: debe ser un entero entre {lo} y {hi}")),
             }
         }
     }
-    for k in ["notify_block", "notify_allow"] {
+    for k in ["notify_block", "notify_allow", "strict"] {
         if let Some(v) = get(k) {
             match v.as_bool() {
                 Some(b) if k == "notify_block" => p.notify_block = Some(b),
+                Some(b) if k == "strict" => p.strict = Some(b),
                 Some(b) => p.notify_allow = Some(b),
                 None => n.err(format!("parametros.{k}: debe ser verdadero o falso")),
             }
@@ -586,7 +594,7 @@ pub fn parse(raw: &[u8], now: i64) -> Result<Parsed, String> {
                 // Solo los ajustes de la lista blanca; el resto (envío al servidor, pausa, contraseña) se ignora.
                 let mut allowed = Map::new();
                 for (k, val) in o {
-                    if ["unknown_policy", "interval_secs", "notify_block", "notify_allow", "theme", "retention_days"].contains(&k.as_str()) {
+                    if ["unknown_policy", "interval_secs", "notify_block", "notify_allow", "theme", "retention_days", "verdict_timeout_secs", "strict"].contains(&k.as_str()) {
                         allowed.insert(k.clone(), val.clone());
                     } else {
                         n.unknown("settings", &Map::from_iter([(k.clone(), Value::Null)]), &["paused", "send_events", "server_url"]);
@@ -830,6 +838,8 @@ pub fn plan(cur: &Snapshot, p: &Parsed, m: &Modes, ctx: &Ctx) -> Plan {
             notify_allow: pp.notify_allow.unwrap_or(base.notify_allow),
             theme: pp.theme.unwrap_or(base.theme),
             retention_days: pp.retention_days.unwrap_or(base.retention_days),
+            verdict_timeout_secs: pp.verdict_timeout_secs.unwrap_or(base.verdict_timeout_secs),
+            strict: pp.strict.unwrap_or(base.strict),
         };
         let (a, b) = (params_value(&cur.params), params_value(&next.params));
         let cambios: Vec<Value> = b.iter().filter(|(k, v)| a.get(*k) != Some(v)).map(|(k, v)| json!({"campo": k, "de": a[k], "a": v})).collect();

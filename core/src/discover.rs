@@ -229,29 +229,51 @@ fn put(b: &mut Vec<u8>, tag: u8, name: &str, val: &[u8]) {
     b.extend(val);
 }
 
-/// Petición IPP 1.1 Get-Printer-Attributes (0x000B) con los atributos pedidos.
-pub fn encode_get_printer_attributes(uri: &str, names: &[&str]) -> Vec<u8> {
-    let mut b = vec![1, 1, 0x00, 0x0B, 0, 0, 0, 1, 0x01];
+/// Petición IPP 1.1 `op` con los atributos pedidos y atributos de operación extra (etiqueta, nombre, valor).
+pub fn encode_request(op: u16, uri: &str, names: &[&str], extra: &[(u8, &str, &[u8])]) -> Vec<u8> {
+    let mut b = vec![1, 1, (op >> 8) as u8, op as u8, 0, 0, 0, 1, 0x01];
     put(&mut b, 0x47, "attributes-charset", b"utf-8");
     put(&mut b, 0x48, "attributes-natural-language", b"en");
     put(&mut b, 0x45, "printer-uri", uri.as_bytes());
     for (i, n) in names.iter().enumerate() {
         put(&mut b, 0x44, if i == 0 { "requested-attributes" } else { "" }, n.as_bytes());
     }
+    for (t, n, v) in extra {
+        put(&mut b, *t, n, v);
+    }
     b.push(0x03);
     b
+}
+
+/// Petición IPP 1.1 Get-Printer-Attributes (0x000B) con los atributos pedidos.
+pub fn encode_get_printer_attributes(uri: &str, names: &[&str]) -> Vec<u8> {
+    encode_request(0x000B, uri, names, &[])
+}
+
+/// URI IPP de la impresora para las peticiones (el transporte elige la ruta real).
+pub fn printer_uri(host: &str, port: u16) -> String {
+    format!("ipp://{}:{port}/ipp/print", if host.contains(':') { format!("[{host}]") } else { host.to_string() })
 }
 
 /// Atributos de impresora (grupo 0x04) como pares (nombre, valor); los multivalor repiten el nombre.
 /// Ignora colecciones y tipos que no se usan; con límites estrictos de longitud.
 pub fn parse_response(b: &[u8]) -> Result<(u16, Vec<(String, String)>), String> {
+    let (status, groups) = parse_groups(b)?;
+    Ok((status, groups.into_iter().filter(|(g, _)| *g == 0x04).flat_map(|(_, a)| a).collect()))
+}
+
+/// Grupo de atributos IPP: (etiqueta del grupo, pares nombre/valor).
+pub type Group = (u8, Vec<(String, String)>);
+
+/// Como `parse_response` pero conservando cada grupo de atributos (etiqueta, pares) en orden.
+pub fn parse_groups(b: &[u8]) -> Result<(u16, Vec<Group>), String> {
     if b.len() < 9 {
         return Err("respuesta IPP demasiado corta".into());
     }
     let status = u16::from_be_bytes([b[2], b[3]]);
     let (mut i, mut depth) = (8usize, 0u32);
-    let mut group = 0u8;
-    let (mut out, mut last) = (vec![], String::new());
+    let mut out: Vec<Group> = vec![];
+    let mut last = String::new();
     while i < b.len() {
         let tag = b[i];
         i += 1;
@@ -259,7 +281,7 @@ pub fn parse_response(b: &[u8]) -> Result<(u16, Vec<(String, String)>), String> 
             break;
         }
         if tag <= 0x0F {
-            group = tag;
+            out.push((tag, vec![]));
             last.clear();
             continue;
         }
@@ -289,9 +311,7 @@ pub fn parse_response(b: &[u8]) -> Result<(u16, Vec<(String, String)>), String> 
             }
             _ => {}
         }
-        if depth > 0 || group != 0x04 {
-            continue;
-        }
+        let Some((_, cur)) = out.last_mut().filter(|_| depth == 0) else { continue };
         let s = match tag {
             0x21 | 0x23 if val.len() == 4 => i32::from_be_bytes([val[0], val[1], val[2], val[3]]).to_string(),
             0x22 if val.len() == 1 => (val[0] != 0).to_string(),
@@ -303,14 +323,13 @@ pub fn parse_response(b: &[u8]) -> Result<(u16, Vec<(String, String)>), String> 
             continue;
         }
         last = name.clone();
-        out.push((name, s));
+        cur.push((name, s));
     }
     Ok((status, out))
 }
 
 pub fn get_printer_attributes(tr: Transport, host: &str, port: u16, names: &[&str]) -> Result<Vec<(String, String)>, String> {
-    let uri = format!("ipp://{}:{port}/ipp/print", if host.contains(':') { format!("[{host}]") } else { host.to_string() });
-    let raw = tr(host, port, &encode_get_printer_attributes(&uri, names))?;
+    let raw = tr(host, port, &encode_get_printer_attributes(&printer_uri(host, port), names))?;
     let (status, attrs) = parse_response(&raw)?;
     if status >= 0x0100 {
         return Err(format!("IPP status 0x{status:04x}"));

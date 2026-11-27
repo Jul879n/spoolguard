@@ -23,7 +23,11 @@ Desde la [última release](https://github.com/Jul879n/spoolguard/releases/latest
 | Extensión de navegador | `SpoolGuard-extension-<versión>.zip` |
 | Servidor | imagen `ghcr.io/jul879n/spoolguard` (ver [docker.md](docker.md)) |
 
-Los instaladores **no están firmados ni notarizados**, por eso el sistema muestra un aviso la primera vez. El workflow `.github/workflows/release.yml` los genera en CI al subir una etiqueta `v*`.
+Los instaladores **no están firmados con certificado de Windows ni notarizados por Apple**, por eso el sistema muestra un aviso la primera vez. El workflow `.github/workflows/release.yml` los genera en CI al subir una etiqueta `v*`. A partir del primer release firmado, cada archivo lleva además una firma minisign (`.minisig`), hay un `SHA256SUMS` firmado y una atestación de procedencia: se comprueban a mano o los verifica la app (ver [firma-releases.md](firma-releases.md)). Esa firma **no elimina** el aviso de SmartScreen ni el de Gatekeeper.
+
+### Actualizar desde la app
+
+Ajustes → **Versión** muestra el número instalado. **Buscar actualización** consulta GitHub solo cuando se pulsa. Si hay una versión nueva, **Descargar e instalar** baja el instalador de tu sistema, verifica el SHA-256 y la firma (si algo falla lo borra y avisa) y lo abre: en Windows se inicia `msiexec`, en macOS se abre el `.dmg` (arrastrar la app a Aplicaciones) y en Linux se abre el `.deb` o `.rpm` con el gestor de paquetes (si no abre, está en la carpeta `updates/` de los datos de la app; instalar con `sudo apt install ./archivo.deb` o `sudo dnf install ./archivo.rpm`). Un release que aún no incluya firmas (como el v0.2.0) no se descarga desde la app: usa la página del release. En el panel web del servidor no existe esta función (se actualiza la imagen Docker).
 
 ## 1. macOS
 
@@ -109,7 +113,7 @@ El registro también se exporta a CSV desde la vista Registro.
 
 ## 8. Desinstalación
 
-1. Quitar la protección previa (macOS/Linux), con la app aún instalada: Ajustes → «Protección previa a la impresión» → Desactivar; o `sudo scripts/guard-cups.sh uninstall` ([guía](proteccion-previa.md)).
+1. Quitar la protección previa, con la app aún instalada: Ajustes → «Protección previa a la impresión» → Desactivar; o a mano: `sudo scripts/guard-cups.sh uninstall` (macOS/Linux) / `scripts\guard-windows.ps1 -Action uninstall` como administrador (Windows) ([guía](proteccion-previa.md)). En Windows, si se desinstala sin desactivar antes, las colas siguen apuntando al procesador `spoolguardpp` (falla abierta, pero el primer trabajo de cada minuto espera 10 s).
 2. En Ajustes, desactivar «Iniciar con el sistema». Salir de la app (libera las colas).
 3. **macOS:** mover «SpoolGuard» de Aplicaciones a la Papelera. **Windows:** Configuración → Aplicaciones → SpoolGuard → Desinstalar (o `msiexec /x` con el `.msi`). **Debian/Ubuntu:** `sudo apt remove spoolguard` (nombre por confirmar con `dpkg -l | grep -i spoolguard`). **Fedora:** `sudo dnf remove spoolguard` (ídem con `rpm -qa | grep -i spoolguard`).
 4. Opcional: borrar el directorio de datos (sección 6); contiene reglas y registro.

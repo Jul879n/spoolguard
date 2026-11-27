@@ -7,9 +7,9 @@
   let waiting = null, release = null, firstHasPw = true, uploaded = "";
 
   // Oculta lo exclusivo de escritorio: inicio automático, notificaciones del sistema, extensión de navegador y envío de eventos.
-  // La retención del registro del servidor es CONTROL_LOG_RETENTION_DAYS (no el ajuste de escritorio).
+  // La retención del registro se configura en la app; solo CONTROL_LOG_RETENTION_DAYS (si está definida) la sobrescribe.
   const css = document.createElement("style");
-  css.textContent = ".card:has(#e-inst),#s-sync,.card:has(#s-ret),.field:has(#s-auto),.field:has(#s-nb),.field:has(#s-na),.field:has(#s-ret){display:none}";
+  css.textContent = ".card:has(#e-inst),.card:has(#u-chk),#ver,#s-sync,.field:has(#s-auto),.field:has(#s-nb),.field:has(#s-na){display:none}";
   document.head.append(css);
 
   async function post(cmd, args) {

@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "src-tauri"]
+members = ["core", "src-tauri", "winguard"]
 resolver = "2"
 
 [profile.release]
@@ -8,3 +8,9 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# DLL del print processor de Windows (winguard): necesita `panic = "unwind"` para que `catch_unwind` proteja a spoolsv.exe.
+# Compilar con: cargo build -p winguard --profile dll
+[profile.dll]
+inherits = "release"
+panic = "unwind"

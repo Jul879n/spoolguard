@@ -304,9 +304,14 @@ pub const GUARD_SCRIPT: &str = include_str!("../../scripts/guard-cups.sh");
 
 /// Colas con filtro de SpoolGuard y colas con PPD (las demás son RAW y no pasan por filtros).
 pub fn guard_status() -> (usize, usize) {
+    guard_status_of(None)
+}
+
+/// Igual que `guard_status`, pero limitado a `only` (p. ej. las colas con control activo); `None` = todas.
+pub fn guard_status_of(only: Option<&[String]>) -> (usize, usize) {
     let (mut on, mut total) = (0, 0);
     for q in list_printers().unwrap_or_default() {
-        if !valid_queue(&q) {
+        if !valid_queue(&q) || only.is_some_and(|o| !o.contains(&q)) {
             continue;
         }
         if let Ok(ppd) = fs::read_to_string(format!("/etc/cups/ppd/{q}.ppd")) {
@@ -331,9 +336,66 @@ pub fn write_verdict(printer: &str, id: u32, allowed: bool) {
     // Veredictos de más de un día: se limpian de paso (sin hilo aparte).
     if let Ok(rd) = fs::read_dir(dir) {
         for e in rd.flatten() {
+            if e.file_name() == "config" || e.file_name().to_string_lossy().starts_with("controlled-") {
+                continue; // la configuración y las marcas de control no caducan
+            }
             if e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|d| d.as_secs() > 86_400) {
                 let _ = fs::remove_file(e.path());
             }
+        }
+    }
+}
+
+/// Marca las colas con control (`verdicts/controlled-<cola>`) y borra las marcas de las demás: el filtro solo espera el
+/// veredicto en las marcadas; una cola protegida sin control deja pasar los trabajos (también en modo estricto).
+/// Sin la carpeta de veredictos (protección no instalada) no hace nada.
+pub fn write_controlled(targets: &[String]) {
+    write_controlled_in(Path::new(VERDICTS_DIR), targets);
+}
+
+fn write_controlled_in(dir: &Path, targets: &[String]) {
+    if !dir.is_dir() {
+        return;
+    }
+    for t in targets.iter().filter(|t| valid_queue(t)) {
+        let m = dir.join(format!("controlled-{t}"));
+        if !m.exists() {
+            let _ = fs::write(&m, b"");
+        }
+    }
+    if let Ok(rd) = fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().to_string();
+            if let Some(q) = n.strip_prefix("controlled-") {
+                if !targets.iter().any(|t| t == q) {
+                    let _ = fs::remove_file(e.path());
+                }
+            }
+        }
+    }
+}
+
+/// Deja la espera del veredicto (1-600 s) y el modo estricto para el filtro (`verdicts/config`, líneas `timeout=` y `strict=`),
+/// de forma atómica y solo si cambió. Fuera de rango = 10 s. Sin la carpeta no hace nada.
+pub fn write_config(timeout_secs: u64, strict: bool) {
+    static LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    let dir = Path::new(VERDICTS_DIR);
+    if !dir.is_dir() {
+        return;
+    }
+    let t = if (1..=600).contains(&timeout_secs) { timeout_secs } else { 10 };
+    let body = format!("timeout={t}\nstrict={}\n", u8::from(strict));
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let dst = dir.join("config");
+    if last.as_deref() == Some(body.as_str()) && dst.is_file() {
+        return;
+    }
+    let tmp = dir.join(".config.tmp");
+    if fs::write(&tmp, &body).is_ok() {
+        if fs::rename(&tmp, &dst).is_ok() {
+            *last = Some(body);
+        } else {
+            let _ = fs::remove_file(&tmp);
         }
     }
 }
@@ -364,6 +426,22 @@ pub fn cancel(id: u32) -> Result<Cancelled, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn marcas_de_cola_controlada() {
+        let d = std::env::temp_dir().join(format!("sg-marcas-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("config"), "timeout=10\nstrict=0\n").unwrap();
+        write_controlled_in(&d, &["A".to_string(), "B".to_string()]);
+        assert!(d.join("controlled-A").is_file() && d.join("controlled-B").is_file());
+        write_controlled_in(&d, &["B".to_string(), "../x".to_string()]);
+        assert!(!d.join("controlled-A").exists(), "se borra la marca de la cola sin control");
+        assert!(d.join("controlled-B").is_file());
+        assert!(d.join("config").is_file(), "no toca otros archivos");
+        write_controlled_in(&d.join("no-existe"), &["A".to_string()]);
+        let _ = fs::remove_dir_all(&d);
+    }
+
     use super::*;
 
     fn m(v: &[(&str, &str)]) -> HashMap<String, String> {

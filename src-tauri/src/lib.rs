@@ -1,9 +1,11 @@
 use control_core::backup;
 use control_core::cups::Cancelled;
+use control_core::direct;
 use control_core::discover;
 use control_core::inventory::InventoryRow;
 use control_core::events::{Event, EventDb, Filter, HttpTransport, SummaryRow, SyncStatus, Syncer, Transport};
 use control_core::rules::{Decision, PrinterRules};
+use control_core::update::{self, HttpFetch, Platform, UpdateInfo, Verified};
 use serde::{Deserialize, Serialize};
 use std::{
     time::Instant,
@@ -49,6 +51,10 @@ struct Settings {
     notify_allow: bool,
     theme: String,
     retention_days: u64,
+    /// Protección previa: segundos que se espera el veredicto antes de decidir sin él (1-600, por defecto 10).
+    verdict_timeout_secs: u64,
+    /// Estricto: sin veredicto a tiempo el trabajo NO se imprime (queda retenido hasta que la app lo evalúe). Por defecto apagado.
+    strict: bool,
     /// SHA-256 de sal + contraseña; vacío = sin contraseña.
     password_hash: String,
     password_salt: String,
@@ -71,6 +77,8 @@ impl Default for Settings {
             notify_allow: false,
             theme: "system".into(),
             retention_days: 90,
+            verdict_timeout_secs: 10,
+            strict: false,
             password_hash: String::new(),
             password_salt: String::new(),
             paused: false,
@@ -153,6 +161,8 @@ struct State {
     /// Descubrimiento de red en curso o el último terminado.
     disc: Mutex<DiscJob>,
     disc_cancel: AtomicBool,
+    /// Estado de la detección de impresión directa.
+    direct: Mutex<direct::Monitor>,
 }
 
 fn guard(s: &State) -> Result<(), String> {
@@ -551,6 +561,21 @@ const NET_FILE: &str = "network.json";
 struct NetSettings {
     /// Subredes que el administrador autoriza a probar (por defecto vacío).
     cidrs: Vec<String>,
+    /// Detección de impresión directa (apagada por defecto).
+    direct: DirectSettings,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
+#[serde(default)]
+struct DirectSettings {
+    enabled: bool,
+    interval_secs: u64,
+}
+
+impl Default for DirectSettings {
+    fn default() -> Self {
+        DirectSettings { enabled: false, interval_secs: direct::DEFAULT_SECS }
+    }
 }
 
 fn load_net(dir: &std::path::Path) -> NetSettings {
@@ -559,25 +584,110 @@ fn load_net(dir: &std::path::Path) -> NetSettings {
 
 #[tauri::command]
 fn get_network_settings(s: tauri::State<Shared>) -> serde_json::Value {
+    let limits = serde_json::json!({"max_hosts": discover::MAX_HOSTS, "min_prefix": discover::MIN_PREFIX});
     if guard(&s).is_err() {
-        return serde_json::json!({"cidrs": [], "direct": {"enabled": false, "interval_secs": 300}, "direct_available": false, "direct_status": [],
-            "limits": {"max_hosts": discover::MAX_HOSTS, "min_prefix": discover::MIN_PREFIX}});
+        return serde_json::json!({"cidrs": [], "direct": DirectSettings::default(), "direct_available": true, "direct_status": [], "limits": limits});
     }
-    // La detección de impresión directa es solo del servidor: aquí no está disponible.
-    serde_json::json!({"cidrs": load_net(&s.dir).cidrs, "direct": {"enabled": false, "interval_secs": 300}, "direct_available": false, "direct_status": [],
-        "limits": {"max_hosts": discover::MAX_HOSTS, "min_prefix": discover::MIN_PREFIX}})
+    let n = load_net(&s.dir);
+    serde_json::json!({"cidrs": n.cidrs, "direct": n.direct, "direct_available": true, "direct_status": s.direct.lock().unwrap().status(), "limits": limits})
+}
+
+/// Estado por impresora de la detección de impresión directa.
+#[tauri::command(rename_all = "snake_case")]
+fn direct_status(s: tauri::State<Shared>) -> Result<Vec<direct::Status>, String> {
+    guard(&s)?;
+    Ok(s.direct.lock().unwrap().status())
 }
 
 #[tauri::command(rename_all = "snake_case")]
-fn set_network_settings(s: tauri::State<Shared>, cidrs: Vec<String>) -> Result<(), String> {
+fn set_network_settings(s: tauri::State<Shared>, cidrs: Vec<String>, direct: Option<DirectSettings>) -> Result<(), String> {
     guard(&s)?;
     let clean: Vec<String> = cidrs.iter().map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect();
     if !clean.is_empty() {
         // Se valida la forma; el permiso para rangos públicos se pide en cada consulta.
         discover::parse_cidrs(&clean, true)?;
     }
-    let b = serde_json::to_vec_pretty(&NetSettings { cidrs: clean }).map_err(|e| e.to_string())?;
-    write_private(&s.dir.join(NET_FILE), &b).map_err(|e| e.to_string())
+    let old = load_net(&s.dir).direct;
+    let mut direct = direct.unwrap_or(old);
+    if direct.interval_secs == 0 {
+        direct.interval_secs = self::direct::DEFAULT_SECS;
+    }
+    if !(self::direct::MIN_SECS..=self::direct::MAX_SECS).contains(&direct.interval_secs) {
+        return Err(format!("El intervalo debe estar entre {} y {} segundos", self::direct::MIN_SECS, self::direct::MAX_SECS));
+    }
+    let b = serde_json::to_vec_pretty(&NetSettings { cidrs: clean, direct }).map_err(|e| e.to_string())?;
+    write_private(&s.dir.join(NET_FILE), &b).map_err(|e| e.to_string())?;
+    if old.enabled != direct.enabled {
+        log_notice(&s, format!("Detección de impresión directa {} por {} (cada {} s)", if direct.enabled { "activada" } else { "desactivada" }, local_user(), direct.interval_secs));
+    }
+    Ok(())
+}
+
+/// Cola consultable: (cola, URI/puerto, host, dirección a consultar, puerto IPP, tipo de conexión).
+type DirectTarget = (String, String, String, String, u16, String);
+
+/// Colas de red consultables por IPP sin cifrado: no `ipps:`/`https:`, no compartidas ni WSD/USB/locales.
+fn direct_targets(s: &State) -> Vec<DirectTarget> {
+    queue::list_printers().unwrap_or_default().into_iter().filter_map(|n| {
+        let i = printers::info(&s.dir, &n, &[]);
+        let u = i.uri.to_lowercase();
+        if i.host.is_empty() || u.starts_with("ipps:") || u.starts_with("https:") || !["socket", "ipp", "lpd", "red"].contains(&i.conn_type.as_str()) {
+            return None;
+        }
+        let port = if i.conn_type == "ipp" { control_core::inventory::host_port(&i.uri).map_or(discover::DEFAULT_PORTS.ipp, |(_, p)| p) } else { discover::DEFAULT_PORTS.ipp };
+        let ip = if i.host.parse::<std::net::IpAddr>().is_ok() { i.host.clone() } else { resolve_v4(&i.host).into_iter().next().unwrap_or_else(|| i.host.clone()) };
+        Some((n, i.uri, i.host, ip, port, i.conn_type))
+    }).collect()
+}
+
+/// Una pasada de detección; `tr` es el transporte IPP (inyectable) y `at` la hora de la pasada.
+fn direct_tick(s: &State, tr: discover::Transport, at: u64) {
+    s.direct.lock().unwrap().last_at = at;
+    let targets = direct_targets(s);
+    for (name, uri, host, ip, port, conn) in &targets {
+        // Consulta de red sin el candado del estado.
+        let rd = direct::read_counter(tr, ip, *port);
+        let alert = {
+            let mut m = s.direct.lock().unwrap();
+            let st = m.printers.entry(name.clone()).or_insert_with(|| direct::Status::new(name, host));
+            direct::poll(st, rd, at, &|from, delta, unit| direct_explained(s, name, from, delta, unit))
+        };
+        if let Some(a) = alert {
+            let mut e = Event::new("desktop", &s.host);
+            e.printer = name.clone();
+            e.decision = "notice".into();
+            e.status = "aviso".into();
+            e.reason = "Impresión directa sospechosa".into();
+            e.document = a.text(name);
+            e.port = control_core::backup::sanitize_uri(uri);
+            e.conn_type = conn.clone();
+            e.pages = (a.unit == "impresiones").then_some(a.delta as u64);
+            record(s, e);
+        }
+    }
+    s.direct.lock().unwrap().printers.retain(|k, _| targets.iter().any(|t| &t.0 == k));
+}
+
+/// ¿Lo liberado por esta app para la cola desde `from` explica el aumento? Si no se puede consultar, no se acusa.
+fn direct_explained(s: &State, printer: &str, from: u64, delta: i64, unit: &str) -> bool {
+    let f = Filter { printer: printer.into(), from: Some(from), decision: "allow".into(), ..Default::default() };
+    match s.events.query(&f, 1000, 0) {
+        Ok(p) => direct::explained_by_local(&p.rows.iter().map(|r| r.pages).collect::<Vec<_>>(), delta, unit),
+        Err(_) => true,
+    }
+}
+
+/// Vigilante: cada 5 s decide si toca consultar (apagado = se pierde la línea base).
+fn direct_watch(s: Shared) {
+    loop {
+        thread::sleep(Duration::from_secs(5));
+        let n = load_net(&s.dir).direct;
+        if !n.enabled {
+            s.direct.lock().unwrap().reset();
+        } else if s.direct.lock().unwrap().due(now(), n.interval_secs) {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| direct_tick(&s, &discover::http_transport, now())));
+        }
+    }
 }
 
 #[derive(Serialize, Default, Clone)]
@@ -726,6 +836,9 @@ fn set_settings(s: tauri::State<Shared>, mut settings: Settings) -> Result<(), S
         settings.password_hash = c.settings.password_hash.clone();
         settings.password_salt = c.settings.password_salt.clone();
         settings.interval_secs = settings.interval_secs.clamp(1, 60);
+        if !(1..=600).contains(&settings.verdict_timeout_secs) {
+            return Err("La espera del veredicto debe ser un número de segundos entre 1 y 600.".into());
+        }
         // El token solo se reemplaza con uno nuevo ("set" = sin cambios, vacío = quitarlo).
         if settings.server_token == "set" {
             settings.server_token = c.settings.server_token.clone();
@@ -860,6 +973,71 @@ fn open_extension(s: tauri::State<Shared>, what: String) -> Result<(), String> {
     browser::open(&s.dir, &what)
 }
 
+// --- Versión y actualización (solo bajo demanda: nada se consulta en segundo plano) ---
+
+#[tauri::command]
+fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").into()
+}
+
+/// Consulta el último release de GitHub (tiempo máximo 8 s) y lo compara con la versión instalada.
+#[tauri::command]
+async fn check_update() -> Result<UpdateInfo, String> {
+    tauri::async_runtime::spawn_blocking(|| update::check_update(&HttpFetch::new(), env!("CARGO_PKG_VERSION"), &Platform::current()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Abre el instalador con el sistema (el usuario completa la instalación; nunca se usa sudo ni se instala en silencio).
+fn open_installer(path: &std::path::Path) -> Result<(), String> {
+    use std::process::Command;
+    #[cfg(windows)]
+    let r = Command::new("msiexec").arg("/i").arg(path).spawn();
+    #[cfg(target_os = "macos")]
+    let r = Command::new("open").arg(path).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let r = Command::new("xdg-open").arg(path).spawn().or_else(|_| Command::new("xdg-open").arg(path.parent().unwrap_or(path)).spawn());
+    r.map(|_| ()).map_err(|e| format!("No se pudo abrir el instalador ({}): {e}", path.display()))
+}
+
+/// Descarga la versión nueva, verifica SHA-256 y firma y abre el instalador. Exige sesión desbloqueada.
+#[tauri::command]
+async fn download_update(app: AppHandle, s: tauri::State<'_, Shared>) -> Result<Verified, String> {
+    guard(&s)?;
+    let dir = s.dir.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let info = update::check_update(&HttpFetch::new(), env!("CARGO_PKG_VERSION"), &Platform::current())?;
+        let mut last = u64::MAX;
+        let v = update::download_update(&HttpFetch::for_download(), &info, &dir, update::PUBLIC_KEY, update::MAX_DOWNLOAD, &mut |done, total| {
+            let pct = (done * 100).checked_div(total).unwrap_or(0);
+            if pct != last {
+                last = pct;
+                let _ = app.emit("update-progress", (done, total));
+            }
+        })?;
+        open_installer(&v.ruta)?;
+        Ok(v)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Abre en el navegador la página de un release (solo github.com/Jul879n/spoolguard/releases/…).
+#[tauri::command]
+fn open_release_page(url: String) -> Result<(), String> {
+    if !update::is_release_page(&url) {
+        return Err("Dirección no permitida".into());
+    }
+    use std::process::Command;
+    #[cfg(windows)]
+    let r = Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn();
+    #[cfg(target_os = "macos")]
+    let r = Command::new("open").arg(&url).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let r = Command::new("xdg-open").arg(&url).spawn();
+    r.map(|_| ()).map_err(|e| format!("No se pudo abrir el navegador: {e}"))
+}
+
 #[tauri::command]
 fn list_browsers() -> Vec<browser::BrowserInfo> {
     browser::list()
@@ -881,52 +1059,128 @@ fn export_extension_zip(app: AppHandle, s: tauri::State<Shared>, path: String) -
     browser::export_zip(&s.dir, app.path().resource_dir().ok(), std::path::Path::new(&path))
 }
 
-/// Protección previa a la impresión (filtro de CUPS): (colas protegidas, colas con filtros, plataforma compatible).
+/// Protección previa a la impresión: (colas protegidas, colas protegibles, plataforma compatible).
+/// macOS/Linux: filtro de CUPS (scripts/guard-cups.sh). Windows: print processor `spoolguardpp` (crate winguard).
 #[tauri::command]
-fn guard_status() -> (usize, usize, bool) {
+fn guard_status(s: tauri::State<Shared>) -> (usize, usize, bool) {
     #[cfg(unix)]
-    {
-        let (on, total) = queue::guard_status();
-        (on, total, true)
-    }
+    let (on, total) = queue::guard_status_of(Some(&controlled_queues(&s)));
     #[cfg(not(unix))]
-    (0, 0, false)
+    let (on, total) = {
+        let _ = &s;
+        queue::guard_status()
+    };
+    (on, total, true)
 }
 
-/// Instala el filtro en las colas de CUPS con permisos de administrador (diálogo nativo de contraseña).
+/// Colas con control activo (global o por impresora): son las únicas a las que se instala la protección previa en macOS/Linux.
+#[cfg(unix)]
+fn controlled_queues(s: &Shared) -> Vec<String> {
+    let cfg = s.config.lock().unwrap();
+    queue::list_printers().unwrap_or_default().into_iter().filter(|n| wants_hold(&cfg, n)).collect()
+}
+
+/// Instala la protección en las colas con permisos de administrador (diálogo nativo de contraseña o UAC).
 #[tauri::command]
-fn guard_install(s: tauri::State<Shared>) -> Result<String, String> {
+fn guard_install(app: AppHandle, s: tauri::State<Shared>) -> Result<String, String> {
     guard(&s)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let user = std::env::var("USER").map_err(|_| "No se conoce el usuario".to_string())?;
-        if !user.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
-            return Err("Nombre de usuario no admitido".into());
-        }
-        // Script en una carpeta privada del usuario: solo se escribe aquí y se ejecuta como administrador.
-        let script = s.dir.join("guard-cups.sh");
-        std::fs::write(&script, queue::GUARD_SCRIPT).map_err(|e| e.to_string())?;
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
-        let sp = script.to_string_lossy().to_string();
-        if sp.contains(['\'', '"', '\\']) {
-            return Err("Ruta de datos no admitida".into());
-        }
-        #[cfg(target_os = "macos")]
-        let out = std::process::Command::new("osascript")
-            .args(["-e", &format!("do shell script \"SG_OWNER={user} /bin/sh '{sp}' install\" with administrator privileges")])
-            .output();
-        #[cfg(not(target_os = "macos"))]
-        let out = std::process::Command::new("pkexec").args(["env", &format!("SG_OWNER={user}"), "/bin/sh", &sp, "install"]).output();
-        let out = out.map_err(|e| e.to_string())?;
-        if out.status.success() {
-            Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-        } else {
-            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-        }
+    guard_run(&app, &s, "install")
+}
+
+/// Quita la protección y restaura las colas como estaban.
+#[tauri::command]
+fn guard_uninstall(app: AppHandle, s: tauri::State<Shared>) -> Result<String, String> {
+    guard(&s)?;
+    guard_run(&app, &s, "uninstall")
+}
+
+#[cfg(unix)]
+fn guard_run(_app: &AppHandle, s: &Shared, action: &str) -> Result<String, String> {
+    use std::os::unix::fs::PermissionsExt;
+    let user = std::env::var("USER").map_err(|_| "No se conoce el usuario".to_string())?;
+    if !user.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
+        return Err("Nombre de usuario no admitido".into());
     }
-    #[cfg(not(unix))]
-    Err("En Windows el spooler ya retiene los trabajos; no hace falta".into())
+    // Script en una carpeta privada del usuario: solo se escribe aquí y se ejecuta como administrador.
+    let script = s.dir.join("guard-cups.sh");
+    std::fs::write(&script, queue::GUARD_SCRIPT).map_err(|e| e.to_string())?;
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    let sp = script.to_string_lossy().to_string();
+    if sp.contains(['\'', '"', '\\']) {
+        return Err("Ruta de datos no admitida".into());
+    }
+    // Solo las colas con control activo: sin nombres el script tocaría todas, incluidas impresoras sin restricción.
+    // Al desinstalar no se limita: restaura toda cola protegida, aunque ya no tenga control (el script ignora las no protegidas).
+    let queues: Vec<String> = if action == "install" {
+        controlled_queues(s).into_iter().filter(|q| queue::valid_queue(q) && !q.contains(['\'', '"', '$', '`'])).collect()
+    } else {
+        Vec::new()
+    };
+    if action == "install" && queues.is_empty() {
+        return Err("No hay colas con control activo: activa el control en una impresora antes de instalar la protección".into());
+    }
+    #[cfg(target_os = "macos")]
+    let out = {
+        let qs: String = queues.iter().map(|q| format!(" '{q}'")).collect();
+        std::process::Command::new("osascript")
+            .args(["-e", &format!("do shell script \"SG_OWNER={user} /bin/sh '{sp}' {action}{qs}\" with administrator privileges")])
+            .output()
+    };
+    #[cfg(not(target_os = "macos"))]
+    let out = std::process::Command::new("pkexec").args(["env", &format!("SG_OWNER={user}"), "/bin/sh", &sp, action]).args(&queues).output();
+    let out = out.map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// Windows: ejecuta scripts/guard-windows.ps1 elevado (UAC una vez). El script va dentro del comando (`-EncodedCommand`),
+/// no en un archivo: así otro proceso del usuario no puede cambiarlo antes de que corra como administrador. La DLL se toma
+/// de la carpeta de recursos de la app (Program Files, solo escribible por administradores).
+#[cfg(windows)]
+fn guard_run(app: &AppHandle, _s: &Shared, action: &str) -> Result<String, String> {
+    use base64::Engine;
+    let dll = app.path().resource_dir().map_err(|e| e.to_string())?.join("winguard.dll");
+    if action == "install" && !dll.is_file() {
+        return Err("Falta winguard.dll junto a la aplicación: reinstala SpoolGuard".into());
+    }
+    let dll = dll.to_string_lossy().trim_start_matches(r"\\?\").replace('\'', "''");
+    // SID del usuario que ejecuta la app (el único, además de SYSTEM y administradores, que podrá escribir veredictos).
+    let sid = printers::no_window(std::process::Command::new("powershell").args([
+        "-NoProfile",
+        "-Command",
+        "[Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+    ]))
+    .output()
+    .map_err(|e| e.to_string())?;
+    let sid = String::from_utf8_lossy(&sid.stdout).trim().to_string();
+    if !sid.starts_with("S-1-") || !sid.chars().all(|c| c.is_ascii_digit() || matches!(c, 'S' | '-')) {
+        return Err("No se pudo identificar al usuario de Windows".into());
+    }
+    let body = format!("& {{ {} }} -Action '{action}' -Owner '{sid}' -Dll '{dll}'", queue::GUARD_SCRIPT);
+    let utf16: Vec<u8> = body.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    let enc = base64::engine::general_purpose::STANDARD.encode(utf16);
+    if enc.len() > 28_000 {
+        return Err("El script de instalación es demasiado largo para la línea de comandos".into());
+    }
+    let outer = format!(
+        "$p = Start-Process powershell -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','{enc}'; exit $p.ExitCode"
+    );
+    let out = printers::no_window(std::process::Command::new("powershell").args(["-NoProfile", "-Command", &outer]))
+        .output()
+        .map_err(|e| e.to_string())?;
+    let (on, total) = queue::guard_status();
+    if out.status.success() {
+        return Ok(format!("{on} de {total} colas protegidas"));
+    }
+    // El script anota en el registro de instalación lo que falló; si no hubo permiso ni siquiera arrancó.
+    let log = std::env::var_os("ProgramData")
+        .map(|p| std::path::PathBuf::from(p).join("SpoolGuard").join("install.log"))
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|t| t.lines().rev().find(|l| l.contains("ERROR")).map(|l| l.to_string()));
+    Err(log.unwrap_or_else(|| "No se concedió el permiso (¿se canceló la confirmación de administrador?)".into()))
 }
 
 #[tauri::command]
@@ -1118,6 +1372,8 @@ fn snapshot_of(c: &Config) -> backup::Snapshot {
             notify_allow: st.notify_allow,
             theme: st.theme.clone(),
             retention_days: st.retention_days,
+            verdict_timeout_secs: st.verdict_timeout_secs,
+            strict: st.strict,
         },
         quick: backup::Quick::default(),
     }
@@ -1137,6 +1393,8 @@ fn apply_snapshot(c: &mut Config, snap: &backup::Snapshot, applied: &[&str]) {
         c.settings.notify_allow = p.notify_allow;
         c.settings.theme = p.theme.clone();
         c.settings.retention_days = p.retention_days;
+        c.settings.verdict_timeout_secs = p.verdict_timeout_secs;
+        c.settings.strict = p.strict;
     }
 }
 
@@ -1349,7 +1607,7 @@ fn host_name() -> String {
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
     #[cfg(windows)]
     {
-        return env("COMPUTERNAME").unwrap_or_default();
+        env("COMPUTERNAME").unwrap_or_default()
     }
     #[cfg(not(windows))]
     {
@@ -1465,6 +1723,12 @@ fn worker(app: AppHandle, s: Shared) {
                 }
             }
         }
+        // El print processor de Windows deja pasar sin esperar las colas que la app no controla (y espera en las que sí).
+        #[cfg(windows)]
+        queue::heartbeat(&targets);
+        queue::write_config(cfg.settings.verdict_timeout_secs, cfg.settings.strict);
+        #[cfg(unix)]
+        queue::write_controlled(&targets);
         let none = PrinterRules::default();
         for printer in &targets {
             let rules = cfg.printers.get(printer).unwrap_or(&none);
@@ -1515,8 +1779,8 @@ fn worker(app: AppHandle, s: Shared) {
                     control_core::rules::explain_both(&cfg.global, rules, &h.job)
                 };
                 let allowed = d == Decision::Allow;
-                // El filtro de CUPS (scripts/guard-macos.sh) espera este veredicto antes de enviar datos a la impresora.
-                #[cfg(unix)]
+                // El filtro de CUPS (scripts/guard-cups.sh) o el print processor de Windows (winguard) espera este veredicto
+                // antes de enviar datos a la impresora.
                 queue::write_verdict(printer, id, allowed);
                 let r = if late {
                     // Ya salió hacia la impresora: permitido no hay nada que liberar; bloqueado se cancela lo que quede.
@@ -1670,6 +1934,7 @@ pub fn run() {
                 unlocked: AtomicBool::new(unlocked0),
                 disc: Mutex::new(DiscJob::default()),
                 disc_cancel: AtomicBool::new(false),
+                direct: Mutex::new(Default::default()),
             });
             app.manage(state.clone());
 
@@ -1721,6 +1986,10 @@ pub fn run() {
             {
                 let st = state.clone();
                 thread::spawn(move || sync_loop(st));
+            }
+            {
+                let st = state.clone();
+                thread::spawn(move || direct_watch(st));
             }
             // Registra el host de la extensión sin intervención del usuario.
             let _ = browser::ensure(&state.dir, app.path().resource_dir().ok());
@@ -1856,8 +2125,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_printers, set_rules, grant_printer_access, get_global_rules, set_global_rules, get_activity, export_rules, import_rules, set_paused, get_paused,
-            clear_log, export_log_csv, query_events, get_inventory, summarize_events, get_network_settings, set_network_settings, discover_network, discover_status, discover_cancel, get_sync_status, get_settings, set_settings, has_password, verify_password,
-            set_password, write_text_file, read_text_file, read_backup_file, export_backup, preview_import, apply_import, app_icon, extension_status, open_extension, list_browsers, install_extension, export_extension_zip, get_autostart, set_autostart, list_apps, guard_status, guard_install
+            clear_log, export_log_csv, query_events, get_inventory, summarize_events, get_network_settings, set_network_settings, direct_status, discover_network, discover_status, discover_cancel, get_sync_status, get_settings, set_settings, has_password, verify_password,
+            set_password, write_text_file, read_text_file, read_backup_file, export_backup, preview_import, apply_import, app_icon, extension_status, open_extension, list_browsers, install_extension, export_extension_zip, get_autostart, set_autostart, list_apps, guard_status, guard_install, guard_uninstall, app_version, check_update, download_update, open_release_page
         ])
         .build(tauri::generate_context!())
         .expect("error al iniciar la aplicación")
@@ -2024,6 +2293,7 @@ mod backup_tests {
             unlocked: AtomicBool::new(true),
             disc: Mutex::new(DiscJob::default()),
             disc_cancel: AtomicBool::new(false),
+            direct: Mutex::new(Default::default()),
         };
         save(&s).unwrap();
         s
@@ -2186,7 +2456,7 @@ mod net_tests {
     }
 
     fn set_net(s: &State, cidrs: Vec<String>) {
-        fs::write(s.dir.join(NET_FILE), serde_json::to_vec(&NetSettings { cidrs }).unwrap()).unwrap();
+        fs::write(s.dir.join(NET_FILE), serde_json::to_vec(&NetSettings { cidrs, ..Default::default() }).unwrap()).unwrap();
     }
 
     #[test]

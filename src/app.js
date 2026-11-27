@@ -168,6 +168,7 @@ async function saveAs(name, content, ext) {
   return path;
 }
 const confirmNative = (msg, okLabel) => dlg.ask(msg, { title: "SpoolGuard", kind: "warning", okLabel, cancelLabel: "Cancelar" });
+const IS_WIN = /Windows/.test(navigator.userAgent);
 const call = async (cmd, args) => { try { return await invoke(cmd, args); } catch (e) { toast(String(e)); throw e; } };
 
 const GLOBAL = "__global__", emptyRules = () => ({ enabled: false, mode: "block", apps: [], sites: [], ips: [] });
@@ -439,7 +440,7 @@ function renderLog() {
     <input id="fq" type="search" placeholder="Buscar…" aria-label="Buscar" value="${esc(filter.q)}">${filterChips()}
     <button class="btn" id="exp">Exportar CSV</button><button class="btn danger" id="clr">Borrar</button></div>
     <div class="tw"><table><tr><th>Fecha</th><th>Estado</th><th>Documento</th><th>Impresora</th><th>Usuario</th>${server ? "<th>Equipo</th>" : ""}<th>Origen</th><th>Salida</th><th>Págs.</th><th>Motivo</th></tr>
-    ${rows.map((a) => `<tr><td>${esc(fmt(a.time))}</td><td>${stateBadge(a)}</td><td>${esc(a.document)}</td><td>${esc(a.printer)}</td><td>${esc(a.user)}</td>${server ? `<td>${esc(a.device || a.host)}</td>` : ""}<td>${esc(a.origin || "local")}</td><td style="min-width:200px">${a.port || a.conn_type ? `<span class="mono">${esc(a.port || "—")}</span><div class="sub">${esc(CONN_T[a.conn_type] || a.conn_type || "")}</div>` : "—"}</td><td>${esc(a.pages ?? "—")}</td><td>${esc(a.reason)}</td></tr>`).join("") || `<tr><td colspan="${server ? 10 : 9}" class="sub">Sin registros</td></tr>`}</table></div>
+    ${rows.map((a) => `<tr><td class="nw">${esc(fmt(a.time))}</td><td>${stateBadge(a)}</td><td>${esc(a.document)}</td><td>${esc(a.printer)}</td><td>${esc(a.user)}</td>${server ? `<td>${esc(a.device || a.host)}</td>` : ""}<td>${esc(a.origin || "local")}</td><td style="min-width:200px">${a.port || a.conn_type ? `<span class="mono">${esc(a.port || "—")}</span><div class="sub">${esc(CONN_T[a.conn_type] || a.conn_type || "")}</div>` : "—"}</td><td>${esc(a.pages ?? "—")}</td><td>${esc(a.reason)}</td></tr>`).join("") || `<tr><td colspan="${server ? 10 : 9}" class="sub">Sin registros</td></tr>`}</table></div>
     <div class="bar pager"><span class="sub">${total} registros</span><span class="grow"></span>
       <label class="sub">Por página <select id="fs">${[10, 25, 50, 100].map((n) => `<option ${n === filter.size ? "selected" : ""}>${n}</option>`).join("")}</select></label>
       <button class="btn" id="pp" ${filter.page <= 1 ? "disabled" : ""}>‹ Anterior</button><span>Página ${filter.page} de ${pages}</span>
@@ -487,7 +488,7 @@ function renderInventory() {
     <div class="bar" style="margin-top:10px"><button class="btn pri" id="nt-go" ${disc.running ? "disabled" : ""}>Buscar impresoras en la red</button><button class="btn" id="nt-stop" ${disc.running ? "" : "hidden"}>Cancelar</button>
       <div class="prog" id="nt-prog" ${disc.running ? "" : "hidden"}><i style="width:${disc.total ? Math.round(100 * disc.done / disc.total) : 0}%"></i></div><span class="sub" id="nt-msg"></span></div>
     <div id="nt-res">${discoveryHtml()}</div></div>
-  ${server ? directHtml() : ""}`;
+  ${net.direct_available ? directHtml() : ""}`;
   $("#iv-ref").onclick = refreshInventory;
   $("#iv-csv").onclick = async () => {
     const csv = toCsv(["nombre", "modelo_driver", "puerto_uri", "tipo_conexion", "ip_host", "compartida", "estado", "retencion_soportada", "control_activo"], inv.map((r) => [r.name, r.driver, r.uri, r.conn_type, r.host, r.shared == null ? "" : r.shared ? "si" : "no", r.status, r.hold_supported ? "si" : "no", r.controlled ? "si" : "no"]));
@@ -507,7 +508,7 @@ function renderInventory() {
     const csv = toCsv(["ip", "puertos", "modelo", "nombre_ipp", "cola", "gestion", "explicacion"], disc.devices.map((d) => [d.ip, (d.ports || []).join(" "), d.model, d.name, d.queue, d.managed, d.explanation]));
     const p = await saveAs("impresoras-en-la-red.csv", csv, "csv").catch((e) => { toast(String(e)); }); if (p) toast("Guardado: " + p);
   };
-  if (server) bindDirect();
+  if (net.direct_available) bindDirect();
 }
 function discoveryHtml() {
   const ds = disc.devices || [];
@@ -564,7 +565,8 @@ async function setupDialog() {
     const [gOn, gTot, gOk] = g;
     return [
       { t: "Permiso de administrador", ok: !gOk || (gTot > 0 && gOn >= gTot),
-        d: gOk ? "Activa la protección previa a la impresión: la app ve cada trabajo antes de que salga papel (Word y otras apps lo envían sin retención). Pide la contraseña de administrador una vez." : "No aplica en este sistema: el spooler ya retiene los trabajos.",
+        d: gOk ? (IS_WIN ? "Activa la protección previa a la impresión: cada trabajo espera el veredicto de la app dentro del spooler antes de salir hacia la impresora. Pide el permiso de administrador (UAC) una vez."
+          : "Activa la protección previa a la impresión: la app ve cada trabajo antes de que salga papel (Word y otras apps lo envían sin retención). Pide la contraseña de administrador una vez.") : "No aplica en este sistema.",
         b: gOk && gOn < gTot ? ["Activar protección", async () => { await call("guard_install"); toast("Protección activada"); }] : null },
       { t: "Notificaciones", ok: null,
         d: "Para ver los bloqueos al instante: Ajustes del Sistema → Notificaciones → SpoolGuard → Permitir. La app no puede comprobarlo." },
@@ -600,12 +602,65 @@ async function setupDialog() {
   d.showModal();
 }
 
+// Versión y actualización (solo bajo demanda; en el panel web del servidor no existe).
+let appVersion = "", upd = { st: "idle" };
+const fmtMB = (n) => (n / 1048576).toFixed(1) + " MB";
+function paintUpd() {
+  const el = $("#u-box"), b = $("#u-chk");
+  if (!el) return;
+  const i = upd.info, busy = upd.st === "checking" || upd.st === "downloading";
+  if (b) { b.disabled = busy; b.textContent = upd.st === "checking" ? "Buscando…" : "Buscar actualización"; }
+  const note = i?.notas ? `<div class="sub upd-notes">${esc(i.notas)}</div>` : "";
+  el.innerHTML = {
+    idle: "", checking: "",
+    ok: `<span class="badge ok">✓ Al día · v${esc(i?.actual)}</span>`,
+    offline: '<span class="badge off">Sin conexión</span>',
+    error: `<span class="badge bad">✕ ${esc(upd.msg)}</span>`,
+    new: `<span class="badge warn">Hay una versión nueva: v${esc(i?.ultima)}</span>${note}<div class="row upd-act">${i?.url_asset
+      ? `<button class="btn pri" id="u-dl">Descargar e instalar</button><span class="sub">${i.tamano ? fmtMB(i.tamano) + " · " : ""}se verifica la firma antes de abrir el instalador</span>`
+      : '<button class="btn pri" id="u-web">Ver la versión en GitHub</button><span class="sub">No hay instalador para este sistema; descárgalo desde la página.</span>'}</div>`,
+    downloading: `<div class="row"><div class="prog" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${upd.pct || 0}"><i style="width:${upd.pct || 0}%"></i></div><span class="sub">Descargando… ${upd.pct || 0}%</span></div>`,
+    done: `<span class="badge ok">✓ Firma verificada</span><div class="sub upd-notes">Se abrió el instalador (${esc(upd.msg)}). Sigue sus pasos para terminar.</div>`,
+    failed: `<span class="badge bad">✕ Verificación fallida</span><div class="sub upd-notes">${esc(upd.msg)}. No se abrió el instalador.</div>`,
+  }[upd.st] ?? "";
+  if ($("#u-dl")) $("#u-dl").onclick = downloadUpdate;
+  if ($("#u-web")) $("#u-web").onclick = () => invoke("open_release_page", { url: i.url_release }).catch((e) => toast(String(e)));
+}
+async function checkUpdate() {
+  upd = { st: "checking" }; paintUpd();
+  try {
+    const info = await invoke("check_update");
+    upd = { st: info.hay_nueva ? "new" : "ok", info };
+  } catch (e) {
+    upd = /^sin conexi/i.test(String(e)) ? { st: "offline" } : { st: "error", msg: String(e) };
+  }
+  paintUpd();
+}
+async function downloadUpdate() {
+  const info = upd.info;
+  upd = { st: "downloading", info, pct: 0 }; paintUpd();
+  try {
+    const r = await invoke("download_update");
+    upd = { st: "done", info, msg: r.nombre };
+  } catch (e) {
+    upd = /^sin conexi|interrumpida/i.test(String(e)) ? { st: "error", msg: "Descarga interrumpida: " + String(e) } : { st: "failed", info, msg: String(e) };
+  }
+  paintUpd();
+}
+if (!window.__MODO_SERVIDOR__) window.__TAURI__.event.listen("update-progress", (e) => {
+  const [done, total] = e.payload;
+  if (upd.st !== "downloading") return;
+  upd.pct = total ? Math.min(100, Math.floor(done * 100 / total)) : 0;
+  const bar = document.querySelector("#u-box .prog");
+  if (bar) { bar.firstElementChild.style.width = upd.pct + "%"; bar.setAttribute("aria-valuenow", upd.pct); bar.nextElementSibling.textContent = `Descargando… ${upd.pct}%`; }
+});
+
 async function renderSettings() {
   const el = $("#v-settings"), auto = await invoke("get_autostart"), hasPw = await invoke("has_password");
   const ext = await invoke("extension_status").catch(() => null);
   const [gOn, gTot, gOk] = await invoke("guard_status").catch(() => [0, 0, false]);
   const gBadge = !gOk ? '<span class="badge off">— No aplica en este sistema</span>'
-    : !gTot ? '<span class="badge off">— Sin colas con filtros</span>'
+    : !gTot ? `<span class="badge off">— Sin colas ${IS_WIN ? "protegibles" : "con filtros"}</span>`
     : gOn >= gTot ? `<span class="badge ok">✓ Activa en ${gOn} de ${gTot} colas</span>`
     : `<span class="badge warn">⚠ Activa en ${gOn} de ${gTot} colas</span>`;
   const ago = ext?.last_seen ? Math.max(0, Math.floor(Date.now() / 1000 - ext.last_seen)) : null;
@@ -623,10 +678,16 @@ async function renderSettings() {
     <div class="field">Iniciar con el sistema ${sw("s-auto", auto, "Iniciar con el sistema")}</div>
     <div class="field">Tema ${segm("s-theme", [["light", "Claro"], ["dark", "Oscuro"], ["system", "Sistema"]], s.theme)}</div>
     <div class="field">Contraseña de administrador <button class="btn" id="s-pw">${hasPw ? "Cambiar" : "Definir"}</button></div></div>
+  ${window.__MODO_SERVIDOR__ ? "" : `<div class="card" id="s-ver"><h3>Versión</h3>
+    <div class="field">SpoolGuard v${esc(appVersion)} <button class="btn" id="u-chk">Buscar actualización</button></div>
+    <div id="u-box" class="upd" aria-live="polite"></div></div>`}
   ${gOk ? `<div class="card"><h3>Protección previa a la impresión</h3>
     <div class="field">Estado ${gBadge}</div>
-    <div class="sub" style="margin:6px 0">Algunas aplicaciones (Word, por ejemplo) envían el trabajo sin retención y se imprimiría antes de poder evaluarlo. Un filtro de CUPS hace esperar cada trabajo el veredicto de la app antes de enviarlo a la impresora. Pide la contraseña de administrador una vez.</div>
-    <div class="field"><span class="sub">Los trabajos esperan hasta 10 s; con la app cerrada se imprimen.</span><button class="btn pri" id="g-inst">${gOn >= gTot && gTot ? "Reparar" : "Activar"}</button></div></div>` : ""}
+    <div class="sub" style="margin:6px 0">${IS_WIN ? "Cierra el hueco en que un trabajo podría salir mientras la cola está activa y antes de que la app lo evalúe. " : "Algunas aplicaciones (Word, por ejemplo) envían el trabajo sin retención y se imprimiría antes de poder evaluarlo. "}${IS_WIN ? "Un procesador de impresión de SpoolGuard en el spooler de Windows hace esperar cada trabajo el veredicto de la app antes de enviarlo a la impresora. Pide el permiso de administrador (UAC) una vez; al actualizar el componente puede reiniciar el servicio Spooler (los trabajos en cola se conservan). Si agregas una impresora, pulsa Reparar." : "Un filtro de CUPS hace esperar cada trabajo el veredicto de la app antes de enviarlo a la impresora. Pide la contraseña de administrador una vez."}</div>
+    <div class="field">Espera del veredicto (s) <input id="s-vto" type="number" min="1" max="600" value="${s.verdict_timeout_secs ?? 10}" style="width:70px"></div>
+    <div class="field">Estricto: no imprimir si la app no responde ${sw("s-strict", !!s.strict, "Estricto: no imprimir si la app no responde")}</div>
+    <div class="sub" style="margin:6px 0">${s.strict ? "Estricto activo: si la app no da el veredicto a tiempo (o está cerrada), el trabajo NO se imprime y queda retenido hasta que la app lo evalúe. Riesgo: con la app cerrada nadie imprime en estas colas."+(IS_WIN?" Conviene una espera larga (p. ej. 120 s).":" En macOS y Linux la espera no tiene límite: el plazo de arriba no se aplica y los trabajos de la cola quedan detrás del retenido.") : "Apagado: pasada la espera sin veredicto (o con la app cerrada) el trabajo se imprime, para no parar la oficina."}</div>
+    <div class="field"><span class="sub"></span>${gOn ? '<button class="btn" id="g-off">Desactivar</button>' : ""}<button class="btn pri" id="g-inst">${gOn >= gTot && gTot ? "Reparar" : "Activar"}</button></div></div>` : ""}
   <div class="card"><h3>Extensión de navegador (opcional, para sitios web)</h3>
     <div class="field">Estado ${extBadge}</div>
     <div class="sub" style="margin:6px 0">El host se registra solo al abrir la app${ext?.registered.length ? " (" + esc(ext.registered.join(", ")) + ")" : ""}. Chrome exige cargar la extensión una vez: Modo desarrollador → Cargar descomprimida → elegir la carpeta.</div>
@@ -644,10 +705,16 @@ async function renderSettings() {
     <div class="field">Dirección <input id="s-url" type="url" placeholder="https://servidor:8080" value="${esc(s.server_url)}" style="width:230px" autocomplete="off"></div>
     <div class="field">Token de equipo <input id="s-tok" type="password" placeholder="${s.server_token ? "Guardado (escribe para cambiar)" : "sgm_…"}" style="width:230px" autocomplete="off"></div>
     <div class="field"><span class="sub" id="s-sst"></span><button class="btn pri" id="s-ssave">Guardar</button></div></div></div>`;
+  paintUpd();
+  if ($("#u-chk")) $("#u-chk").onclick = checkUpdate;
   const push = async (patch) => { Object.assign(settings, patch); await call("set_settings", { settings }); applyTheme(); };
   const tog = (id, key) => $(id).onclick = async () => { await push({ [key]: !settings[key] }); renderSettings(); };
   tog("#s-nb", "notify_block"); tog("#s-na", "notify_allow");
   if ($("#g-inst")) $("#g-inst").onclick = async () => { $("#g-inst").disabled = true; try { await call("guard_install"); toast("Protección activada"); } finally { renderSettings(); } };
+  if ($("#g-off")) $("#g-off").onclick = async () => {
+    if (!await confirmNative("Se quitará la protección previa y las colas volverán a su configuración original. Los trabajos podrán salir sin esperar el veredicto de la app. ¿Continuar?", "Desactivar")) return;
+    $("#g-off").disabled = true; try { await call("guard_uninstall"); toast("Protección desactivada"); } finally { renderSettings(); }
+  };
   $("#s-auto").onclick = async () => { await call("set_autostart", { enabled: !auto }); renderSettings(); };
   const seg = (id, key) => $(id).querySelectorAll("button").forEach((b) => b.onclick = async () => { await push({ [key]: b.dataset.v }); renderSettings(); });
   seg("#s-unk", "unknown_policy"); seg("#s-theme", "theme");
@@ -660,6 +727,12 @@ async function renderSettings() {
   };
   $("#e-inst").onclick = () => installExtDialog().catch(() => {});
   $("#s-int").onchange = (e) => push({ interval_secs: Math.max(1, Math.min(60, +e.target.value || 1)) });
+  $("#s-strict") && ($("#s-strict").onclick = async () => { await push({ strict: !settings.strict }); renderSettings(); });
+  $("#s-vto") && ($("#s-vto").onchange = async (e) => {
+    const v = Number(e.target.value);
+    if (!Number.isInteger(v) || v < 1 || v > 600) { toast("La espera debe ser un número entero de segundos entre 1 y 600."); e.target.value = settings.verdict_timeout_secs ?? 10; return; }
+    await push({ verdict_timeout_secs: v });
+  });
   $("#s-ret").onchange = (e) => push({ retention_days: Math.max(1, +e.target.value || 90) });
   const paintSync = async () => {
     const st = await invoke("get_sync_status").catch(() => null), el = $("#s-sst");
@@ -713,6 +786,7 @@ async function refreshPrinters() {
 }
 async function load() {
   settings = await invoke("get_settings"); applyTheme();
+  if (!window.__MODO_SERVIDOR__) { appVersion = await invoke("app_version").catch(() => ""); $("#ver").textContent = appVersion ? "v" + appVersion : ""; }
   await refreshLog(); renderSettings();
   $("#v-printers").innerHTML = "<h2>Impresoras</h2><p class='sub'>Buscando impresoras…</p>";
   try { printers = await invoke("list_printers"); } catch (e) { printers = []; toast(String(e)); }

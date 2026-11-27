@@ -46,19 +46,24 @@ type Params struct {
 	NotifyAllow   bool   `json:"notify_allow"`
 	Theme         string `json:"theme"`
 	RetentionDays uint64 `json:"retention_days"`
+	// Protección previa: espera del veredicto (1–600 s, por defecto 10) y modo estricto (por defecto apagado = falla abierta).
+	VerdictTimeoutSecs uint64 `json:"verdict_timeout_secs"`
+	Strict             bool   `json:"strict"`
 }
 
 func defaultParams() Params {
-	return Params{UnknownPolicy: "allow", IntervalSecs: 1, NotifyBlock: true, Theme: "system", RetentionDays: 90}
+	return Params{UnknownPolicy: "allow", IntervalSecs: 1, NotifyBlock: true, Theme: "system", RetentionDays: 90, VerdictTimeoutSecs: 10}
 }
 
 type partialParams struct {
-	UnknownPolicy *string
-	IntervalSecs  *uint64
-	NotifyBlock   *bool
-	NotifyAllow   *bool
-	Theme         *string
-	RetentionDays *uint64
+	UnknownPolicy      *string
+	IntervalSecs       *uint64
+	NotifyBlock        *bool
+	NotifyAllow        *bool
+	Theme              *string
+	RetentionDays      *uint64
+	VerdictTimeoutSecs *uint64
+	Strict             *bool
 }
 
 // Snapshot es el estado exportable/importable del equipo.
@@ -428,7 +433,7 @@ func rulesFrom(v any, path string, n *notes) (rules.Rules, bool) {
 }
 
 func paramsFrom(m map[string]any, n *notes) partialParams {
-	n.unknown("parametros", m, "unknown_policy", "interval_secs", "notify_block", "notify_allow", "theme", "retention_days")
+	n.unknown("parametros", m, "unknown_policy", "interval_secs", "notify_block", "notify_allow", "theme", "retention_days", "verdict_timeout_secs", "strict")
 	var p partialParams
 	if v := m["unknown_policy"]; v != nil {
 		if s, ok := v.(string); ok && (s == "allow" || s == "block") {
@@ -448,7 +453,7 @@ func paramsFrom(m map[string]any, n *notes) partialParams {
 		k      string
 		lo, hi uint64
 		dst    **uint64
-	}{{"interval_secs", 1, 60, &p.IntervalSecs}, {"retention_days", 1, 3650, &p.RetentionDays}} {
+	}{{"interval_secs", 1, 60, &p.IntervalSecs}, {"retention_days", 1, 3650, &p.RetentionDays}, {"verdict_timeout_secs", 1, 600, &p.VerdictTimeoutSecs}} {
 		if v := m[c.k]; v != nil {
 			if x, ok := asUint(v); ok && x >= c.lo && x <= c.hi {
 				*c.dst = &x
@@ -460,7 +465,7 @@ func paramsFrom(m map[string]any, n *notes) partialParams {
 	for _, c := range []struct {
 		k   string
 		dst **bool
-	}{{"notify_block", &p.NotifyBlock}, {"notify_allow", &p.NotifyAllow}} {
+	}{{"notify_block", &p.NotifyBlock}, {"notify_allow", &p.NotifyAllow}, {"strict", &p.Strict}} {
 		if v := m[c.k]; v != nil {
 			if b, ok := v.(bool); ok {
 				*c.dst = &b
@@ -745,7 +750,7 @@ func parseBackup(raw []byte, now int64) (*Parsed, error) {
 			allowed := map[string]any{}
 			for _, k := range sortedKeys(o) {
 				switch k {
-				case "unknown_policy", "interval_secs", "notify_block", "notify_allow", "theme", "retention_days":
+				case "unknown_policy", "interval_secs", "notify_block", "notify_allow", "theme", "retention_days", "verdict_timeout_secs", "strict":
 					allowed[k] = o[k]
 				case "paused", "send_events", "server_url":
 				default:
@@ -925,7 +930,8 @@ func mergeRules(a, b rules.Rules) rules.Rules {
 
 func paramsMap(p Params) map[string]any {
 	return map[string]any{"unknown_policy": p.UnknownPolicy, "interval_secs": p.IntervalSecs, "notify_block": p.NotifyBlock,
-		"notify_allow": p.NotifyAllow, "theme": p.Theme, "retention_days": p.RetentionDays}
+		"notify_allow": p.NotifyAllow, "theme": p.Theme, "retention_days": p.RetentionDays,
+		"verdict_timeout_secs": p.VerdictTimeoutSecs, "strict": p.Strict}
 }
 
 func ifNil[T any](p *T, def T) T {
@@ -1025,6 +1031,7 @@ func planImport(cur Snapshot, p *Parsed, m Modes, ctx BackupCtx) Plan {
 			UnknownPolicy: ifNil(pp.UnknownPolicy, base.UnknownPolicy), IntervalSecs: ifNil(pp.IntervalSecs, base.IntervalSecs),
 			NotifyBlock: ifNil(pp.NotifyBlock, base.NotifyBlock), NotifyAllow: ifNil(pp.NotifyAllow, base.NotifyAllow),
 			Theme: ifNil(pp.Theme, base.Theme), RetentionDays: ifNil(pp.RetentionDays, base.RetentionDays),
+			VerdictTimeoutSecs: ifNil(pp.VerdictTimeoutSecs, base.VerdictTimeoutSecs), Strict: ifNil(pp.Strict, base.Strict),
 		}
 		a, b := paramsMap(cur.Params), paramsMap(next.Params)
 		cambios := []any{}

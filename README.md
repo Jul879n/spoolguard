@@ -14,7 +14,7 @@ SpoolGuard controla qué se imprime en una organización: retiene cada trabajo d
 - **Reglas por aplicación, sitio web y equipo** (IP o nombre), en modo «bloquear coincidencias» o «permitir solo coincidencias».
 - **Regla global y reglas por impresora**: la global se suma a la de cada impresora; si cualquiera bloquea, se bloquea.
 - **Suspensión de reglas**: una regla se pausa por un rato o hasta reanudarla, sin borrarla.
-- **Protección previa a la impresión**: apps como Word envían los trabajos sin retención; un filtro de CUPS los hace esperar el veredicto antes de que salga papel ([guía](docs/proteccion-previa.md)).
+- **Protección previa a la impresión**: apps como Word envían los trabajos sin retención; un filtro de CUPS (macOS/Linux) o un print processor del spooler (Windows) los hace esperar el veredicto antes de que salga papel ([guía](docs/proteccion-previa.md)).
 - **Extensión de navegador** para reglas por sitio web ([guía](docs/instalar-extension.md)).
 - **Modo servidor (Docker)**: cola IPP compartida y panel web para controlar varios PC ([guía](docs/docker.md)).
 - **Registro e inventario**: quién imprimió qué, qué se bloqueó y por qué; inventario de impresoras y búsqueda en la red.
@@ -59,7 +59,7 @@ Descarga el archivo de tu sistema desde la [última release](https://github.com/
 | Extensión de navegador | `SpoolGuard-extension-<versión>.zip` |
 | Servidor (Docker) | `ghcr.io/jul879n/spoolguard` |
 
-Los instaladores **no están firmados ni notarizados**: macOS (Gatekeeper) y Windows (SmartScreen) mostrarán un aviso la primera vez. Pasos exactos en [docs/instalacion.md](docs/instalacion.md).
+Los instaladores **no están firmados ni notarizados**: macOS (Gatekeeper) y Windows (SmartScreen) mostrarán un aviso la primera vez. Pasos exactos en [docs/instalacion.md](docs/instalacion.md). La app muestra su versión y busca actualizaciones desde Ajustes; los releases nuevos llevan firma minisign y atestación de procedencia ([cómo verificarlos](docs/firma-releases.md)).
 
 Servidor en Docker:
 
@@ -78,6 +78,7 @@ La app abre sola el asistente **Configuración de inicio** la primera vez. Guía
 | Tema | Archivo |
 |---|---|
 | Instalación por sistema y desinstalación | [docs/instalacion.md](docs/instalacion.md) |
+| Firma y verificación de releases | [docs/firma-releases.md](docs/firma-releases.md) |
 | Primeros pasos | [docs/primeros-pasos.md](docs/primeros-pasos.md) |
 | Protección previa a la impresión | [docs/proteccion-previa.md](docs/proteccion-previa.md) |
 | Servidor con Docker | [docs/docker.md](docs/docker.md) · referencia completa: [docs/modo-servidor.md](docs/modo-servidor.md) |

@@ -33,6 +33,11 @@ jobs:
             src: target/release/bundle/msi/*.msi
             out: windows-x64.msi
     runs-on: ${{ matrix.os }}
+    env:
+      # Authenticode (opcional, DESACTIVADO mientras no existan estos secretos). Cuando haya un certificado de firma
+      # de código (OV/EV, de pago, o SignPath Foundation para proyectos de código abierto) basta con cargar los
+      # secretos WINDOWS_CERT_PFX_BASE64 y WINDOWS_CERT_PASSWORD: el paso "Firmar MSI (Authenticode)" se activa solo.
+      HAS_WIN_CERT: ${{ secrets.WINDOWS_CERT_PFX_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -61,6 +66,8 @@ jobs:
 
       - run: npm ci
 
+      # La DLL del print processor (protección previa en Windows, crate winguard) la compila src-tauri/build.rs con el perfil
+      # `dll` (panic = unwind) y el MSI la empaqueta como recurso (src-tauri/tauri.windows.conf.json): no hace falta un paso aparte.
       - name: Compilar y empaquetar
         shell: bash
         run: |
@@ -68,6 +75,25 @@ jobs:
           if [ -n "${{ matrix.target }}" ]; then ARGS+=(--target "${{ matrix.target }}"); fi
           if [ -n '${{ matrix.config }}' ]; then ARGS+=(--config '${{ matrix.config }}'); fi
           npx tauri build "${ARGS[@]}"
+
+      # Authenticode del MSI (solo Windows y solo con certificado). Sin esto, SmartScreen sigue avisando al ejecutar el MSI;
+      # la firma minisign del job "sign" NO sustituye a Authenticode (la verifica la app, no Windows).
+      # Alternativa gratuita para código abierto: SignPath Foundation (acción signpath/github-action-submit-signing-request).
+      - name: Firmar MSI (Authenticode)
+        if: matrix.os == 'windows-latest' && env.HAS_WIN_CERT == 'true'
+        shell: pwsh
+        env:
+          PFX_B64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_B64))
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
+          Get-ChildItem target/release/bundle/msi/*.msi | ForEach-Object {
+            & $signtool sign /f $pfx /p $env:PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "signtool falló" }
+          }
+          Remove-Item $pfx -Force
 
       # Nombres finales: SpoolGuard-<versión>-<sistema>-<arquitectura>.<ext>
       - name: Renombrar
@@ -104,8 +130,74 @@ jobs:
           if-no-files-found: error
           path: dist/*
 
-  publish:
+  # Firma de releases (gratis, minisign/Ed25519): .minisig por archivo, SHA256SUMS firmado y atestación de procedencia.
+  # La app verifica estas firmas con la clave pública embebida antes de abrir un instalador (docs/firma-releases.md).
+  sign:
     needs: [build, extension]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write      # actions/attest-build-provenance: token OIDC para el certificado de Sigstore
+      attestations: write  # actions/attest-build-provenance: publicar la atestación
+    env:
+      # Clave pública (la misma que PUBLIC_KEY en core/src/update.rs; se comprueba abajo).
+      SPOOLGUARD_PUBLIC_KEY: RWT2sE9dCRki0zPwG/uvsyUeU11Ckbk+/Y5E1NimghhGqIBAep88Sl+K
+      MINISIGN_VERSION: "0.12"
+      MINISIGN_SHA256: 9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Instalar minisign (versión y hash fijados)
+        run: |
+          curl -fsSL -o minisign.tgz "https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz"
+          echo "${MINISIGN_SHA256}  minisign.tgz" | sha256sum -c -
+          tar xzf minisign.tgz
+          sudo install -m 0755 minisign-linux/x86_64/minisign /usr/local/bin/minisign
+      - name: Firmar instaladores y SHA256SUMS
+        env:
+          # Secretos del repositorio (Settings > Secrets and variables > Actions); ver docs/firma-releases.md.
+          SPOOLGUARD_SIGNING_KEY: ${{ secrets.SPOOLGUARD_SIGNING_KEY }}
+          SPOOLGUARD_SIGNING_KEY_PASSWORD: ${{ secrets.SPOOLGUARD_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          grep -q "$SPOOLGUARD_PUBLIC_KEY" core/src/update.rs || { echo "::error::La clave pública del workflow no coincide con core/src/update.rs"; exit 1; }
+          if [ -z "${SPOOLGUARD_SIGNING_KEY:-}" ]; then echo "::error::Falta el secreto SPOOLGUARD_SIGNING_KEY (ver docs/firma-releases.md)"; exit 1; fi
+          umask 077
+          KEY="$RUNNER_TEMP/spoolguard.key"
+          printf '%s\n' "$SPOOLGUARD_SIGNING_KEY" > "$KEY"
+          trap 'rm -f "$KEY"' EXIT
+          cd dist
+          sign() { # $1 = archivo; el comentario firmado nombra el archivo (la app lo exige)
+            printf '%s\n' "$SPOOLGUARD_SIGNING_KEY_PASSWORD" | minisign -S -s "$KEY" -x "$1.minisig" -t "file:$1" -m "$1" > /dev/null
+            minisign -V -P "$SPOOLGUARD_PUBLIC_KEY" -x "$1.minisig" -m "$1"
+          }
+          for f in SpoolGuard-*; do sign "$f"; done
+          # SHA256SUMS solo de los archivos de datos (no de las firmas) y firmado a su vez.
+          sha256sum $(ls SpoolGuard-* | grep -v '\.minisig$') > SHA256SUMS
+          sign SHA256SUMS
+          cat SHA256SUMS
+          ls -la
+      - name: Atestación de procedencia (Sigstore)
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/SpoolGuard-*
+            dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-firmas
+          if-no-files-found: error
+          path: |
+            dist/*.minisig
+            dist/SHA256SUMS
+
+  publish:
+    needs: [build, extension, sign]
     # Sin etiqueta (workflow_dispatch) solo se compila: no se publica.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest

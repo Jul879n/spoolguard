@@ -52,6 +52,8 @@ Copia `.env.example` a `.env` y completa `CONTROL_ADMIN_PASSWORD` (vacío, `up` 
 | `IPP_BIND` | Interfaz donde se publica IPP (631). Por defecto `0.0.0.0`: es el servicio que usan los PC; limítalo con una IP o con el cortafuegos. |
 | `CONTROL_TRUST_PROXY=1` | Toma la IP del cliente de `X-Forwarded-For`. Solo detrás de tu proxy; **no publiques el 8080** con esta opción. |
 | `CONTROL_RELEASE_ON_EXIT=1` | Libera las colas al detener el servidor. Por defecto quedan retenidas: los trabajos esperan al servidor y nada se imprime sin control. |
+| `SPOOLGUARD_VERDICT_TIMEOUT` | Segundos que el backend espera el veredicto antes de decidir sin él (1–600, por defecto 10; inválido = ignorado con aviso). |
+| `SPOOLGUARD_STRICT=1` | Modo estricto: sin veredicto a tiempo el trabajo **no se imprime** (CUPS lo retiene y el servidor lo evalúa). Por defecto apagado (falla abierta). Ver [proteccion-previa.md](proteccion-previa.md). |
 | `SPOOLGUARD_TAG` | Etiqueta de la imagen en los compose de `deploy/` (por defecto `latest`). |
 
 ## Agregar impresoras

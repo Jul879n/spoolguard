@@ -57,7 +57,13 @@ if [ -n "${PRINTERS:-}" ]; then
       IFS=';'
       continue
     fi
-    if lpadmin -p "$name" -E -v "spoolguard:$uri" -m raw -o printer-is-shared=true 2>/dev/null; then
+    # cupsd puede responder a lpstat antes de aceptar lpadmin (arranque lento): reintenta unos segundos.
+    made=1
+    for _try in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+      if lpadmin -p "$name" -E -v "spoolguard:$uri" -m raw -o printer-is-shared=true 2>/dev/null; then made=0; break; fi
+      sleep 0.5
+    done
+    if [ "$made" = 0 ]; then
       echo "entrypoint: cola $name -> $uri"
       if hold_new_jobs "$name"; then
         echo "entrypoint: cola $name con Hold-New-Jobs"

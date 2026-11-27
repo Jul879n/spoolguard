@@ -15,3 +15,11 @@ dist/
 
 deploy/.env
 deploy/admin_password.txt
+
+# Claves de firma de releases: la clave PRIVADA nunca va en el repositorio (vive en ~/Documents/herramientas/spoolguard-keys/)
+*.key
+spoolguard*.key
+clave-password*
+*.pem
+*.pfx
+*.p12

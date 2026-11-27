@@ -322,6 +322,7 @@ func TestRetencion(t *testing.T) {
 	if k, _ := e.s.events.purge(0); k != 0 || e.s.events.count() != 3 {
 		t.Fatalf("0 = sin límite")
 	}
+	e.s.retentionEnv = true
 	e.s.retention = 365
 	e.s.purgeEvents()
 	if e.s.events.count() != 2 {
@@ -432,5 +433,23 @@ func TestPermisosYEsquemaDeEventsDB(t *testing.T) {
 	e.s.events.Close()
 	if _, err := openEvents(e.s.dir); err == nil || !strings.Contains(err.Error(), "más nueva") {
 		t.Errorf("versión futura: %v", err)
+	}
+}
+
+func TestRetencionUsaElAjusteDeLaApp(t *testing.T) {
+	t.Setenv("CONTROL_LOG_RETENTION_DAYS", "")
+	e := newEnv(t)
+	if e.s.retentionEnv {
+		t.Fatal("sin variable de entorno no debe mandar la variable")
+	}
+	e.s.mu.Lock()
+	e.s.cfg.Settings.RetentionDays = 45
+	e.s.mu.Unlock()
+	if got := e.s.effectiveRetention(); got != 45 {
+		t.Fatalf("debía usar el ajuste de la app (45), fue %d", got)
+	}
+	e.s.retentionEnv, e.s.retention = true, 7
+	if got := e.s.effectiveRetention(); got != 7 {
+		t.Fatalf("la variable de entorno debe mandar (7), fue %d", got)
 	}
 }

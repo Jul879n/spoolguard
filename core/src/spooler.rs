@@ -29,9 +29,10 @@ pub use crate::cups::{Cancelled, HeldJob};
 use crate::rules::Job;
 use std::{
     collections::{HashMap, HashSet},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{LazyLock, Mutex, MutexGuard},
     thread::JoinHandle,
+    time::{Duration, Instant},
 };
 use windows::{
     core::{PCWSTR, PWSTR},
@@ -151,6 +152,22 @@ impl Handle {
         unsafe { GetPrinterW(self.0, 2, Some(bytes), &mut needed) }.map_err(|e| format!("GetPrinterW: {e}"))?;
         let info = unsafe { &*(buf.as_ptr() as *const PRINTER_INFO_2W) };
         Ok(info.Status & PRINTER_STATUS_PAUSED != 0)
+    }
+
+    /// Procesador de impresión de la cola (nivel 2, igual que `printer_paused`).
+    fn print_processor(&self) -> Result<String, String> {
+        let mut needed = 0u32;
+        let _ = unsafe { GetPrinterW(self.0, 2, None, &mut needed) };
+        let mut buf = vec![0u64; (needed as usize).div_ceil(8).max(1)];
+        let bytes = unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 8) };
+        unsafe { GetPrinterW(self.0, 2, Some(bytes), &mut needed) }.map_err(|e| format!("GetPrinterW: {e}"))?;
+        let info = unsafe { &*(buf.as_ptr() as *const PRINTER_INFO_2W) };
+        Ok(text(info.pPrintProcessor).unwrap_or_default())
+    }
+
+    /// ¿La cola usa el print processor de SpoolGuard? Sus trabajos esperan el veredicto de la app antes de enviar datos.
+    fn guarded(&self) -> bool {
+        self.print_processor().is_ok_and(|p| p.eq_ignore_ascii_case(PROCESSOR))
     }
 
     fn printer_control(&self, cmd: u32) -> Result<(), String> {
@@ -436,6 +453,7 @@ pub fn held_job_ids(printer: &str) -> Result<Vec<u32>, String> {
     let h = Handle::open(printer)?;
     let jobs = h.jobs()?;
     let holding = state().holding.contains(printer);
+    let guarded = h.guarded();
     let live: HashSet<u32> = jobs.iter().map(|j| token(printer, j)).collect();
     let mut out = vec![];
     let mut still_spooling = false;
@@ -446,6 +464,17 @@ pub fn held_job_ids(printer: &str) -> Result<Vec<u32>, String> {
             if j.paused() && !j.done() {
                 let _ = h.job_control(j.id, JOB_CONTROL_RESUME);
             }
+            continue;
+        }
+        // Modo estricto: el procesador no tuvo veredicto a tiempo, no envió nada y dejó el trabajo «Complete, Retained» con acuse
+        // «hold»; se evalúa como cualquier retenido (permitir = reiniciarlo, bloquear = borrarlo).
+        // Un retenido que alguien borró (p. ej. desde la cola de Windows) queda «Deleting, Retained» para siempre: se suelta.
+        if guarded && j.status & JOB_STATUS_DELETING != 0 && j.status & JOB_STATUS_RETAINED != 0 {
+            let _ = h.job_control(j.id, JOB_CONTROL_RELEASE);
+            continue;
+        }
+        if guarded && strict_held(&h, printer, j) {
+            out.push(t);
             continue;
         }
         if j.done() {
@@ -459,7 +488,9 @@ pub fn held_job_ids(printer: &str) -> Result<Vec<u32>, String> {
         // Mientras el spooler recibe los datos el nombre del documento es provisional («Local Downlevel Document») y las páginas
         // no existen: evaluarlo entonces permite un trabajo bloqueado (medido). Se evalúa cuando termina de encolarse, salvo
         // que ya haya empezado a imprimir (cola activa), que no admite espera.
-        if j.spooling() && !j.printing() {
+        // En una cola con el procesador de SpoolGuard un trabajo que ya «imprime» solo está esperando el veredicto (no ha enviado
+        // nada): se espera igual a que termine de encolarse, para evaluarlo con su nombre real.
+        if j.spooling() && (!j.printing() || guarded) {
             still_spooling = true;
             continue;
         }
@@ -505,7 +536,8 @@ pub fn job_info(_work_dir: &Path, id: u32) -> Result<HeldJob, String> {
         .as_deref()
         .map(|m| m.trim_start_matches('\\').to_string())
         .filter(|m| !m.is_empty() && !m.eq_ignore_ascii_case(&local));
-    let held = !state().released.contains(&id) && !j.done() && !(j.spooling() && !j.printing());
+    let strict = h.guarded() && strict_held(&h, &printer, &j);
+    let held = !state().released.contains(&id) && (!j.done() || strict) && !(j.spooling() && !j.printing());
     Ok(HeldJob {
         id,
         held,
@@ -551,7 +583,10 @@ pub fn release(id: u32) -> Result<(), String> {
     let guard = queue_ops();
     state().released.insert(id);
     let r = (|| -> Result<(), String> {
-        if h.job(job_id)?.paused() {
+        let cur = h.job(job_id)?;
+        if h.guarded() && strict_held(&h, &printer, &cur) {
+            h.job_control(job_id, JOB_CONTROL_RESTART)?; // retenido por el modo estricto: se vuelve a procesar con el veredicto ya escrito
+        } else if cur.paused() {
             h.job_control(job_id, JOB_CONTROL_RESUME)?;
         }
         if holding && h.printer_paused()? {
@@ -586,11 +621,21 @@ pub fn cancel(id: u32) -> Result<Cancelled, String> {
     let (printer, job_id) = resolve(id)?;
     let h = Handle::open(&printer)?;
     let before = h.job(job_id);
+    // En una cola con el procesador de SpoolGuard «imprimiendo» puede ser solo esperar el veredicto: se confirma con su acuse.
+    let held_strict = h.guarded() && before.as_ref().is_ok_and(|j| strict_held(&h, &printer, j));
+    let waiting = h.guarded() && before.as_ref().is_ok_and(|j| j.printing() && j.status & (JOB_STATUS_PRINTED | JOB_STATUS_COMPLETE) == 0);
     let outcome = match &before {
+        Ok(_) if waiting || held_strict => Cancelled::Held, // en modo estricto nada salió: el procesador lo retuvo sin enviar datos
         Ok(j) if j.sent() => Cancelled::AlreadyPrinted,
         Ok(_) => Cancelled::Held,
         Err(_) => Cancelled::Gone,
     };
+    if held_strict {
+        // Retenido por el modo estricto: nada salió. Soltar la retención lo saca de la cola (borrarlo lo dejaría «Deleting, Retained»).
+        let _ = h.job_control(job_id, JOB_CONTROL_RELEASE);
+        forget(id);
+        return Ok(Cancelled::Held);
+    }
     if outcome != Cancelled::Gone {
         if let Err(e) = h.job_control(job_id, JOB_CONTROL_DELETE) {
             // Terminó entre la lectura y el borrado.
@@ -602,5 +647,213 @@ pub fn cancel(id: u32) -> Result<Cancelled, String> {
         }
     }
     forget(id);
+    if waiting {
+        // El procesador anota «deny» al descartar los datos; sin ese acuse no se puede afirmar que no salió.
+        return Ok(if ack(&printer, job_id, Duration::from_millis(1500)).as_deref() == Some("deny") { Cancelled::Held } else { Cancelled::AlreadyPrinted });
+    }
     Ok(outcome)
+}
+
+// ---- Protección previa a la impresión (print processor `spoolguardpp`, crate `winguard`) ----
+// Cada trabajo de una cola protegida espera, dentro del spooler y antes de enviar datos a la impresora, el veredicto
+// `allow`/`deny` que escribe `write_verdict` (misma idea que el filtro de CUPS; ver docs/proteccion-previa.md).
+
+/// Nombre con el que se registra el print processor (debe coincidir con scripts/guard-windows.ps1).
+pub const PROCESSOR: &str = "spoolguardpp";
+
+/// Instalador (se ejecuta elevado: ver `guard_install` en src-tauri).
+pub const GUARD_SCRIPT: &str = include_str!("../../scripts/guard-windows.ps1");
+
+/// `%ProgramData%\SpoolGuard\verdicts`: solo escriben SYSTEM, Administradores y el usuario que ejecuta la app.
+pub fn verdicts_dir() -> PathBuf {
+    let base = std::env::var_os("ProgramData").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+    base.join("SpoolGuard").join("verdicts")
+}
+
+/// Nombre del archivo de veredicto de un trabajo. Misma regla que `winguard::verdict::file_name` (probada con
+/// `winguard/tests/names.txt` en ambos crates): sin separadores de ruta ni caracteres reservados, 128 caracteres como máximo.
+pub fn verdict_file_name(queue: &str, job_id: u32) -> String {
+    let q: String = queue
+        .chars()
+        .map(|c| if c.is_control() || matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '_' } else { c })
+        .take(128)
+        .collect();
+    format!("{}-{}", if q.is_empty() { "_" } else { &q }, job_id)
+}
+
+/// Deja el veredicto (`allow`/`deny`) que el print processor espera: archivo temporal en la misma carpeta y renombrado
+/// (el procesador nunca ve un archivo a medias). Sin la carpeta (protección no instalada) no hace nada.
+pub fn write_verdict(printer: &str, token: u32, allowed: bool) {
+    let dir = verdicts_dir();
+    let Ok((queue, job_id)) = resolve(token) else { return };
+    if !dir.is_dir() {
+        return;
+    }
+    let name = verdict_file_name(&queue, job_id);
+    let tmp = dir.join(format!(".{name}.tmp"));
+    let dst = dir.join(&name);
+    let _ = printer;
+    // Acuse de un trabajo anterior con el mismo id (salvo «hold»: es de este trabajo y el procesador lo usa al reprocesarlo).
+    let ack_path = dir.join(format!("{name}.ack"));
+    if !std::fs::read(&ack_path).is_ok_and(|b| b.starts_with(b"hold")) {
+        let _ = std::fs::remove_file(&ack_path);
+    }
+    if std::fs::write(&tmp, if allowed { "allow" } else { "deny" }).is_ok() && std::fs::rename(&tmp, &dst).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    purge_verdicts(&dir);
+}
+
+/// Latido de la app para el procesador (`verdicts\.alive`): las colas que controla ahora mismo, una por línea. Con latido
+/// reciente el procesador espera el veredicto completo en esas colas y deja pasar sin esperar las demás (nadie escribiría
+/// un veredicto); sin latido (app cerrada o colgada) espera con falla abierta. Como mucho una vez por segundo.
+pub fn heartbeat(queues: &[String]) {
+    static LAST: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(Default::default);
+    {
+        let mut l = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if l.is_some_and(|t| t.elapsed() < Duration::from_millis(1000)) {
+            return;
+        }
+        *l = Some(Instant::now());
+    }
+    let dir = verdicts_dir();
+    if !dir.is_dir() {
+        return;
+    }
+    let body = queues.iter().filter(|q| !q.contains(['\n', '\r'])).cloned().collect::<Vec<_>>().join("\n");
+    let tmp = dir.join(".alive.tmp");
+    if std::fs::write(&tmp, body).is_ok() && std::fs::rename(&tmp, dir.join(".alive")).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+/// Veredictos y acuses de más de un día se limpian de paso, como mucho cada 10 minutos (sin hilo aparte).
+fn purge_verdicts(dir: &Path) {
+    static LAST: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(Default::default);
+    {
+        let mut l = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if l.is_some_and(|t| t.elapsed() < Duration::from_secs(600)) {
+            return;
+        }
+        *l = Some(Instant::now());
+    }
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            if e.file_name() == "config" || e.file_name().to_string_lossy().starts_with("controlled-") {
+                continue; // la configuración y las marcas de control no caducan
+            }
+            if e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|d| d.as_secs() > 86_400) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+}
+
+/// Deja la espera del veredicto (segundos, 1-600) y el modo estricto para el procesador (`verdicts\config`), de forma atómica
+/// y solo si cambió. Un valor fuera de rango se corrige al seguro (10 s). Sin la carpeta no hace nada.
+pub fn write_config(timeout_secs: u64, strict: bool) {
+    static LAST: LazyLock<Mutex<Option<String>>> = LazyLock::new(Default::default);
+    let dir = verdicts_dir();
+    if !dir.is_dir() {
+        return;
+    }
+    let t = if (1..=600).contains(&timeout_secs) { timeout_secs } else { 10 };
+    let body = format!("timeout={t}\nstrict={}\n", u8::from(strict));
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let dst = dir.join("config");
+    if last.as_deref() == Some(body.as_str()) && dst.is_file() {
+        return;
+    }
+    let tmp = dir.join(".config.tmp");
+    if std::fs::write(&tmp, &body).is_ok() {
+        if std::fs::rename(&tmp, &dst).is_ok() {
+            *last = Some(body);
+        } else {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    }
+}
+
+/// Trabajo que el modo estricto dejó retenido: terminado y retenido en la cola («Complete, Retained») y con acuse `hold`.
+fn strict_held(_h: &Handle, printer: &str, j: &Spooled) -> bool {
+    j.status & JOB_STATUS_COMPLETE != 0 && j.status & JOB_STATUS_RETAINED != 0 && j.status & JOB_STATUS_DELETING == 0 && ack(printer, j.id, Duration::ZERO).as_deref() == Some("hold")
+}
+
+/// Acuse del procesador (`deny`, `allow`, `timeout` o `hold`) de un trabajo; espera hasta `wait` a que aparezca.
+fn ack(printer: &str, job_id: u32, wait: Duration) -> Option<String> {
+    let path = verdicts_dir().join(format!("{}.ack", verdict_file_name(printer, job_id)));
+    let t0 = Instant::now();
+    loop {
+        if let Ok(s) = std::fs::read_to_string(&path) {
+            return s.split_whitespace().next().map(str::to_string);
+        }
+        if t0.elapsed() >= wait {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Nombres de los drivers V4 instalados. El spooler no llama al print processor de las colas con driver V4 (medido, ver
+/// work/winguard/INFORME.md), así que no se pueden proteger ni cuentan en «protegibles».
+fn v4_drivers() -> HashSet<String> {
+    let (mut needed, mut count) = (0u32, 0u32);
+    let _ = unsafe { EnumPrinterDriversW(PCWSTR::null(), PCWSTR::null(), 2, None, &mut needed, &mut count) };
+    if needed == 0 {
+        return HashSet::new();
+    }
+    let mut buf = vec![0u64; (needed as usize).div_ceil(8)];
+    let bytes = unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 8) };
+    if unsafe { EnumPrinterDriversW(PCWSTR::null(), PCWSTR::null(), 2, Some(bytes), &mut needed, &mut count) }.is_err() {
+        return HashSet::new();
+    }
+    let infos = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const DRIVER_INFO_2W, count as usize) };
+    infos.iter().filter(|d| d.cVersion >= 4).filter_map(|d| text(d.pName)).collect()
+}
+
+/// (colas con el procesador de SpoolGuard, colas protegibles). Protegibles: locales que usan `winprint` (o ya el nuestro)
+/// con driver V3, salvo el fax; las que usan un procesador de otro fabricante o un driver V4 se omiten (como las colas sin
+/// PPD en CUPS). No pide permisos.
+pub fn guard_status() -> (usize, usize) {
+    let (mut needed, mut count) = (0u32, 0u32);
+    let _ = unsafe { EnumPrintersW(PRINTER_ENUM_LOCAL, PCWSTR::null(), 2, None, &mut needed, &mut count) };
+    if needed == 0 {
+        return (0, 0);
+    }
+    let mut buf = vec![0u64; (needed as usize).div_ceil(8)];
+    let bytes = unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, buf.len() * 8) };
+    if unsafe { EnumPrintersW(PRINTER_ENUM_LOCAL, PCWSTR::null(), 2, Some(bytes), &mut needed, &mut count) }.is_err() {
+        return (0, 0);
+    }
+    let infos = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const PRINTER_INFO_2W, count as usize) };
+    let v4 = v4_drivers();
+    let (mut on, mut total) = (0, 0);
+    for i in infos {
+        if text(i.pDriverName).is_some_and(|d| v4.contains(&d)) {
+            continue;
+        }
+        let proc = text(i.pPrintProcessor).unwrap_or_default();
+        let port = text(i.pPortName).unwrap_or_default();
+        if proc.eq_ignore_ascii_case(PROCESSOR) {
+            on += 1;
+            total += 1;
+        } else if proc.eq_ignore_ascii_case("winprint") && !port.eq_ignore_ascii_case("SHRFAX:") {
+            total += 1;
+        }
+    }
+    (on, total)
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::verdict_file_name;
+
+    #[test]
+    fn nombres_compartidos_con_el_procesador() {
+        for l in include_str!("../../winguard/tests/names.txt").lines().filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            let mut p = l.splitn(3, '\t');
+            let (q, id, want) = (p.next().unwrap_or(""), p.next().unwrap_or("0"), p.next().unwrap_or(""));
+            assert_eq!(verdict_file_name(q, id.parse().unwrap_or(0)), want, "{l}");
+        }
+    }
 }

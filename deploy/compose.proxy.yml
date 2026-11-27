@@ -19,6 +19,8 @@ services:
     environment:
       CONTROL_ADMIN_PASSWORD: ${CONTROL_ADMIN_PASSWORD:?define CONTROL_ADMIN_PASSWORD (no hay contraseña por defecto)}
       PRINTERS: ${PRINTERS:-}
+      SPOOLGUARD_VERDICT_TIMEOUT: ${SPOOLGUARD_VERDICT_TIMEOUT:-}   # protección previa: segundos de espera (1-600, defecto 10)
+      SPOOLGUARD_STRICT: ${SPOOLGUARD_STRICT:-}   # 1 = estricto: sin veredicto a tiempo no se imprime (defecto 0)
       CONTROL_TRUST_PROXY: "1"   # IP real del cliente desde X-Forwarded-For (seguro: el 8080 no está publicado)
     volumes:
       - control-data:/data

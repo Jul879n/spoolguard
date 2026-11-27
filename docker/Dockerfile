@@ -12,7 +12,11 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/control-server ./s
 FROM alpine:3.21
 # cups: cupsd; cups-client: lp, lpstat, lpadmin, cancel; ipptool: lectura de atributos de los trabajos.
 # Sin cups-filters ni ghostscript: los trabajos se reenvían tal cual (RAW).
+# cups depende de poppler-utils (pdftops) y de sus librerías gráficas (cairo, X11, fuentes...), que no se usan con colas RAW:
+# se borran sus archivos (apk no deja quitarlos sin quitar cups). Si algo de lo necesario quedara sin su librería, `ldd` lo delataría en las pruebas.
 RUN apk add --no-cache cups cups-client ipptool \
+ && for p in poppler-utils poppler cairo libx11 libxcb libxext libxrender libxau libxdmcp fontconfig freetype pixman lcms2 openjpeg tiff libpng libjpeg-turbo libwebp libsharpyuv; do \
+      apk info -L "$p" 2>/dev/null | grep -v -e '^$' -e 'contains:' | sed 's|^|/|' | xargs rm -f; done \
  && rm -rf /usr/share/cups/doc-root /usr/share/cups/templates /usr/share/cups/locale /usr/share/doc /usr/share/man /usr/lib/cups/cgi-bin /etc/cups/ppd \
  && (getent group lpadmin >/dev/null || addgroup -S lpadmin) \
  && adduser -S -D -H -u 1000 -G lpadmin -s /sbin/nologin control \

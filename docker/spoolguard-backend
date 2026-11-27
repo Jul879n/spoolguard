@@ -1,14 +1,31 @@
 #!/bin/sh
 # Backend de CUPS de SpoolGuard (solo Docker): envuelve el backend real de la cola (device-uri «spoolguard:socket://IP:9100»)
 # y espera el veredicto de control-server antes de enviar datos a la impresora. Sin veredicto en 10 s imprime.
+# Configurable (archivo «config» de la carpeta de veredictos, lo escribe control-server desde Ajustes o desde las variables
+# SPOOLGUARD_VERDICT_TIMEOUT y SPOOLGUARD_STRICT): timeout=<1-600 s> y strict=<0|1>. Inválido o ausente = 10 s y falla abierta.
+# Con strict=1, sin veredicto a tiempo NO imprime: sale con 3 (CUPS_BACKEND_HOLD; el 4 es CUPS_BACKEND_STOP y detiene la cola entera) y CUPS retiene el trabajo para que se evalúe.
 [ $# -eq 0 ] && exit 0   # sin argumentos CUPS lo invoca para descubrir dispositivos: no ofrece ninguno
 URI="${DEVICE_URI#spoolguard:}"
-V="/var/lib/spoolguard/verdicts/${PRINTER}-$1"
+D="${CONTROL_VERDICTS_DIR:-/var/lib/spoolguard/verdicts}"
+V="$D/${PRINTER}-$1"
+T=10; S=0
+if [ -f "$D/config" ]; then
+  t=$(sed -n 's/^timeout=\([0-9]\{1,3\}\)$/\1/p' "$D/config" 2>/dev/null | head -n 1)
+  s=$(sed -n 's/^strict=\([01]\)$/\1/p' "$D/config" 2>/dev/null | head -n 1)
+  if [ -n "$t" ] && [ "$t" -ge 1 ] && [ "$t" -le 600 ]; then T="$t"; fi
+  [ "$s" = 1 ] && S=1
+fi
+# Solo las colas con control (marca que escribe control-server) esperan el veredicto; las demás pasan sin espera.
+CTL=1; [ -f "$D/controlled-$PRINTER" ] || CTL=0
 v=""; i=0
-while [ "$i" -lt 100 ]; do
+while [ "$CTL" = 1 ] && [ "$i" -lt $((T * 10)) ]; do
   if [ -f "$V" ]; then v=$(cat "$V" 2>/dev/null); break; fi
   sleep 0.1; i=$((i + 1))
 done
+if [ "$CTL" = 1 ] && [ -z "$v" ] && [ "$S" = 1 ]; then
+  echo "INFO: sin veredicto de SpoolGuard en ${T} s (modo estricto): trabajo retenido" >&2
+  exit 3
+fi
 if [ "$v" = deny ]; then
   echo "INFO: bloqueado por SpoolGuard" >&2
   [ -z "${6:-}" ] && cat >/dev/null 2>&1

@@ -248,6 +248,9 @@ func (s *Server) setSettings(_ *http.Request, args json.RawMessage) (any, error)
 	n.Paused = s.paused.Load()
 	n.IntervalSecs = min(max(n.IntervalSecs, 1), 60)
 	n.RetentionDays = min(max(n.RetentionDays, 1), 3650)
+	if n.VerdictTimeoutSecs < 1 || n.VerdictTimeoutSecs > 600 {
+		return nil, bad("la espera del veredicto debe estar entre 1 y 600 segundos")
+	}
 	if n.UnknownPolicy != "block" {
 		n.UnknownPolicy = "allow"
 	}

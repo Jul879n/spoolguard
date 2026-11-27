@@ -1,0 +1,14 @@
+[package]
+name = "winguard"
+version = "0.3.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Print processor de SpoolGuard para Windows: espera el veredicto de la app antes de enviar datos a la impresora."
+
+# Se carga dentro de spoolsv.exe (SYSTEM): no se enlaza nada que no sea necesario y no hay dependencias.
+[lib]
+name = "winguard"
+crate-type = ["cdylib", "rlib"]
+
+# Perfil de la DLL: igual que release, pero con `panic = "unwind"`. El perfil release del proyecto usa `abort`, y con `abort`
+# `catch_unwind` no atrapa nada: un fallo propio mataría spoolsv.exe. Compilar con `--profile dll` (ver winguard/src/lib.rs).

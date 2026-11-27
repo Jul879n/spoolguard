@@ -28,13 +28,16 @@ type Settings struct {
 	NotifyAllow   bool   `json:"notify_allow"`
 	Theme         string `json:"theme"`
 	RetentionDays uint64 `json:"retention_days"`
-	PasswordHash  string `json:"password_hash"`
-	PasswordSalt  string `json:"password_salt"`
-	Paused        bool   `json:"paused"`
+	// Protección previa (Docker: la lee el backend de CUPS desde verdicts/config).
+	VerdictTimeoutSecs uint64 `json:"verdict_timeout_secs"`
+	Strict             bool   `json:"strict"`
+	PasswordHash       string `json:"password_hash"`
+	PasswordSalt       string `json:"password_salt"`
+	Paused             bool   `json:"paused"`
 }
 
 func defaultSettings() Settings {
-	return Settings{UnknownPolicy: "allow", IntervalSecs: 1, NotifyBlock: true, Theme: "system", RetentionDays: 90}
+	return Settings{UnknownPolicy: "allow", IntervalSecs: 1, NotifyBlock: true, Theme: "system", RetentionDays: defaultRetention, VerdictTimeoutSecs: 10}
 }
 
 type Config struct {
@@ -102,17 +105,18 @@ type QuickMark struct {
 }
 
 type Server struct {
-	dir       string
-	mu        sync.Mutex // cfg, quick
-	cfg       Config
-	events    *eventStore
-	retention int64 // días (CONTROL_LOG_RETENTION_DAYS); 0 = sin límite
-	quick     Quick
-	holdMu    sync.Mutex // managed.json y cambios de retención
-	paused    atomic.Bool
-	auth      *Auth
-	ext       *extStore
-	hub       rulesHub // avisa a /ext/events cuando cambia la configuración
+	dir          string
+	mu           sync.Mutex // cfg, quick
+	cfg          Config
+	events       *eventStore
+	retentionEnv bool
+	retention    int64 // días; 0 = sin límite. Solo vale si retentionEnv (CONTROL_LOG_RETENTION_DAYS); si no, manda el ajuste de la app
+	quick        Quick
+	holdMu       sync.Mutex // managed.json y cambios de retención
+	paused       atomic.Bool
+	auth         *Auth
+	ext          *extStore
+	hub          rulesHub // avisa a /ext/events cuando cambia la configuración
 
 	extDir   string // carpeta de la extensión a publicar; vacío = autodetectar (ver extDirs)
 	extCache extPkgCache
@@ -201,6 +205,7 @@ func (s *Server) saveLocked() error {
 	}
 	err := writeAtomic(cur, b)
 	if err == nil {
+		cups.WriteConfig(s.cfg.Settings.VerdictTimeoutSecs, s.cfg.Settings.Strict)
 		s.hub.notify()
 	}
 	return err
@@ -349,11 +354,12 @@ func New(dir string) (*Server, error) {
 	}
 	hardenPerms(dir)
 	cfg, warn := loadConfig(dir)
+	envWarn := applyVerdictEnv(&cfg.Settings)
 	ev, err := openEvents(dir)
 	if err != nil {
 		return nil, fmt.Errorf("no se pudo abrir events.db: %w", err)
 	}
-	s := &Server{dir: dir, cfg: cfg, quick: loadQuick(dir), auth: newAuth(), ext: loadExt(dir), events: ev, retention: retentionDays()}
+	s := &Server{dir: dir, cfg: cfg, quick: loadQuick(dir), auth: newAuth(), ext: loadExt(dir), events: ev, retention: retentionDays(), retentionEnv: retentionEnvSet()}
 	if ports, err := discover.ParsePorts(os.Getenv("CONTROL_DISCOVER_PORTS")); err == nil { // solo para pruebas locales
 		s.net.ports = ports
 	}
@@ -362,6 +368,10 @@ func New(dir string) (*Server, error) {
 	if warn != "" {
 		s.logNotice(warn)
 	}
+	if envWarn != "" {
+		s.logNotice(envWarn)
+	}
+	cups.WriteConfig(cfg.Settings.VerdictTimeoutSecs, cfg.Settings.Strict)
 	if err := s.initPassword(); err != nil {
 		return nil, err
 	}
@@ -386,6 +396,7 @@ func (s *Server) Reconcile() {
 	for _, p := range names {
 		if !s.wantsHold(&cfg, p) {
 			_ = cups.HoldNewJobs(s.dir, p, false)
+			cups.MarkControlled(p, false)
 		}
 	}
 }
